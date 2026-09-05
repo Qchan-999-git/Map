@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+#leaflet-map {
+  isolation: isolate;
+  height: 100%;
+  width: 100%;
+}
+
+/* Leaflet Div Icon reset */
+.leaflet-div-icon {
+  background: transparent;
+  border: none;
+}
+
+/* Custom Tooltip Styling */
+.leaflet-tooltip.custom-tooltip {
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(4px);
+  padding: 3px 8px;
+}
+
+.leaflet-tooltip.custom-tooltip::before {
+  border-top-color: rgba(15, 23, 42, 0.9);
+}
+
+.leaflet-tooltip.search-tooltip {
+  background: #1d4ed8;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 3px 8px;
+}
+
+.leaflet-tooltip.search-tooltip::before {
+  border-top-color: #1d4ed8;
+}
+
+/* Hide scrollbars for horizontal pill rows */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

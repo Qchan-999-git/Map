@@ -1,0 +1,6 @@
+{
+  "name": "地図アプリ",
+  "description": "リアルタイム検索、ルート案内、地点登録、標高・距離計測、国土地理院・航空写真・標準地図切替に対応した高機能地図アプリケーション",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
