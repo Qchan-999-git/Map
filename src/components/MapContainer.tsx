@@ -15,6 +15,7 @@ interface MapContainerProps {
   routeEnd: GeoPoint | null;
   isMeasuring: boolean;
   measurePoints: [number, number][];
+  isDriving?: boolean;
   onMapClick: (lat: number, lng: number) => void;
   onSpotClick: (spot: SavedSpot) => void;
   onMapMove: (center: { lat: number; lng: number }, zoom: number) => void;
@@ -33,6 +34,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   routeEnd,
   isMeasuring,
   measurePoints,
+  isDriving,
   onMapClick,
   onSpotClick,
   onMapMove,
@@ -386,14 +388,16 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       });
     }
 
-    // Fit route bounds nicely with padding
-    const bounds = L.latLngBounds(routeResult.coordinates);
-    map.fitBounds(bounds, {
-      padding: [60, 60],
-      maxZoom: 17,
-      animate: true,
-    });
-  }, [routeResult, routeStart, routeEnd]);
+    // Fit route bounds nicely with padding (skip while driving to keep GPS follow stable)
+    if (!isDriving) {
+      const bounds = L.latLngBounds(routeResult.coordinates);
+      map.fitBounds(bounds, {
+        padding: [60, 60],
+        maxZoom: 17,
+        animate: true,
+      });
+    }
+  }, [routeResult, routeStart, routeEnd, isDriving]);
 
   // Measurement Line & Markers
   useEffect(() => {

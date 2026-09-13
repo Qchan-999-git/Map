@@ -5,6 +5,7 @@ import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles'
 import { LaneGuidanceCard } from './LaneGuidanceCard';
 import { ShutoMergeAssist } from './ShutoMergeAssist';
 import { ElevatedBadge } from './ElevatedBadge';
+import { DriveModeCard } from './DriveModeCard';
 import { buildLaneAdvices, speakAdvice } from '../services/laneGuidance';
 import { useAutoLaneSpeech } from '../hooks/useAutoLaneSpeech';
 import { findMerges } from '../services/shutoAssist';
@@ -32,6 +33,7 @@ interface RoutePanelProps {
   onCalculateRoute: (mode: TravelMode) => void;
   onClearRoute: () => void;
   onClose: () => void;
+  onDriveModeChange?: (driving: boolean) => void;
 }
 
 export const RoutePanel: React.FC<RoutePanelProps> = ({
@@ -48,9 +50,11 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   onCalculateRoute,
   onClearRoute,
   onClose,
+  onDriveModeChange,
 }) => {
   const [mode, setMode] = useState<TravelMode>('driving');
   const [voiceOn, setVoiceOn] = useState(true);
+  const [navMode, setNavMode] = useState<'plan' | 'drive'>('plan');
 
   const laneAdvices = useMemo(
     () => (routeResult ? buildLaneAdvices(routeResult.steps, driverProfile) : []),
@@ -128,6 +132,35 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
     }
   };
 
+  const isDriving = navMode === 'drive';
+  useEffect(() => {
+    onDriveModeChange?.(isDriving);
+  }, [isDriving, onDriveModeChange]);
+
+  useEffect(() => {
+    if (!routeResult) setNavMode('plan');
+  }, [routeResult]);
+
+  const canDrive =
+    mode === 'driving' && routeResult !== null && laneAdvices.length > 0;
+
+  const handleStartDrive = () => {
+    if (!canDrive) return;
+    setNavMode('drive');
+    autoSpeech.start();
+  };
+
+  const handleExitDrive = () => {
+    autoSpeech.stop();
+    setNavMode('plan');
+  };
+
+  const handleClosePanel = () => {
+    if (isDriving) autoSpeech.stop();
+    setNavMode('plan');
+    onClose();
+  };
+
   const handleUseCurrentLocationForStart = () => {
     if (!currentLocation) return;
     onSetStart({
@@ -144,17 +177,35 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
       <div className="p-4 border-b border-neutral-200/80 flex items-center justify-between bg-neutral-50/70">
         <div className="flex items-center gap-2 font-bold text-base text-neutral-900">
           <Navigation size={20} className="text-blue-600" />
-          <span>ルート案内・経路検索</span>
+          <span>{isDriving ? '走行モード' : 'ルート案内・経路検索'}</span>
         </div>
         <button
           id="close-route-panel-btn"
-          onClick={onClose}
+          onClick={handleClosePanel}
           className="p-1 rounded-full text-neutral-400 hover:text-neutral-700 hover:bg-neutral-200/60 transition-colors"
         >
           <X size={18} />
         </button>
       </div>
 
+      {isDriving ? (
+        <div className="flex-1 flex min-h-0">
+          <DriveModeCard
+            advices={laneAdvices}
+            remaining={autoSpeech.remaining}
+            tracking={autoSpeech.tracking}
+            earlyMeters={earlyMeters}
+            liveLevel={liveLevel}
+            merges={merges}
+            junctions={junctions}
+            voiceOn={voiceOn}
+            onToggleVoice={() => setVoiceOn((v) => !v)}
+            onExitDrive={handleExitDrive}
+            trackError={autoSpeech.error}
+          />
+        </div>
+      ) : (
+        <>
       {/* Inputs & Travel Modes */}
       <div className="p-4 space-y-3.5 border-b border-neutral-100">
         {/* Driver Profile Selector */}
@@ -370,6 +421,16 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
             )}
 
             {/* Summary card */}
+            {canDrive && (
+              <button
+                id="start-drive-mode-btn"
+                onClick={handleStartDrive}
+                className="w-full py-3 px-4 rounded-2xl bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 min-h-[44px]"
+              >
+                <Navigation size={16} />
+                <span>走行開始（Next1件表示に切替）</span>
+              </button>
+            )}
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 p-4 rounded-2xl border border-blue-100/90 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
@@ -460,6 +521,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };
