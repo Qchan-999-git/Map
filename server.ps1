@@ -11,14 +11,39 @@ if (-not (Test-Path (Join-Path $root "index.html"))) {
 
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
-$listener.Start()
+try {
+    $listener.Start()
+} catch {
+    Write-Host "ポート $port はすでに使用中のため、既存のサーバーを利用します。" -ForegroundColor Yellow
+}
 
 Write-Host "============================================"
 Write-Host " 地図アプリを起動しました。"
 Write-Host " ブラウザで http://localhost:$port/ を開いています..."
 Write-Host " 終了するときは、このウィンドウを閉じてください。"
 Write-Host "============================================"
-Start-Process "http://localhost:$port/"
+
+# Edge を優先して開く（無ければ既定ブラウザ）
+$url = "http://localhost:$port/"
+$edgeCandidates = @(
+    "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+)
+$edgePath = $null
+foreach ($p in $edgeCandidates) {
+    if (Test-Path $p) { $edgePath = $p; break }
+}
+if ($edgePath) {
+    Start-Process -FilePath $edgePath -ArgumentList $url
+    Write-Host " Microsoft Edge で開きます。"
+} else {
+    try {
+        Start-Process $url
+        Write-Host " 既定のブラウザで開きます。"
+    } catch {
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c start `"`" `"$url`""
+    }
+}
 
 $mimeTypes = @{
     ".html" = "text/html; charset=utf-8"
