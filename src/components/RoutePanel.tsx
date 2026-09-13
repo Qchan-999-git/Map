@@ -1,12 +1,21 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { DriverProfile, GeoPoint, RouteResult, TravelMode } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
 import { LaneGuidanceCard } from './LaneGuidanceCard';
 import { ShutoMergeAssist } from './ShutoMergeAssist';
-import { buildLaneAdvices } from '../services/laneGuidance';
+import { ElevatedBadge } from './ElevatedBadge';
+import { buildLaneAdvices, speakAdvice } from '../services/laneGuidance';
 import { useAutoLaneSpeech } from '../hooks/useAutoLaneSpeech';
 import { findMerges } from '../services/shutoAssist';
+import {
+  analyzeElevated,
+  computeHighwayRanges,
+  ElevatedVerify,
+  extractJunctions,
+  levelAt,
+  verifyElevatedTags,
+} from '../services/elevated';
 import { formatDistance, formatDuration } from '../services/mapService';
 
 interface RoutePanelProps {
@@ -51,6 +60,18 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
     () => (routeResult ? findMerges(routeResult.steps) : []),
     [routeResult]
   );
+  const elevatedInfo = useMemo(
+    () => (routeResult ? analyzeElevated(routeResult.steps) : null),
+    [routeResult]
+  );
+  const highwayRanges = useMemo(
+    () => (routeResult ? computeHighwayRanges(routeResult.steps) : []),
+    [routeResult]
+  );
+  const junctions = useMemo(
+    () => (routeResult ? extractJunctions(routeResult.steps) : []),
+    [routeResult]
+  );
   const earlyMeters = getDriverProfileConfig(driverProfile).earlyGuidanceMeters;
 
   // Single shared GPS watch for lane + shuto auto guidance (hands-free)
@@ -60,6 +81,45 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
     voiceOn && mode === 'driving' && laneAdvices.length > 0,
     earlyMeters
   );
+
+  // Live elevated level from traveled distance
+  const liveLevel =
+    autoSpeech.tracking && highwayRanges.length > 0
+      ? levelAt(autoSpeech.traveledMeters, highwayRanges)
+      : null;
+
+  // Dedicated voice on highway/surface switch (no tap)
+  const prevLevelRef = useRef<'highway' | 'surface' | null>(null);
+  useEffect(() => {
+    if (!autoSpeech.tracking || !voiceOn || !liveLevel) return;
+    if (prevLevelRef.current !== null && prevLevelRef.current !== liveLevel) {
+      speakAdvice(
+        liveLevel === 'highway'
+          ? '高速に入りました。下道とお間違えなく。'
+          : '一般道に入りました。上の高速とは別ルートです。'
+      );
+    }
+    prevLevelRef.current = liveLevel;
+  }, [liveLevel, autoSpeech.tracking, voiceOn]);
+
+  // Overpass verification (bridge/tunnel) per route
+  const [elevatedVerify, setElevatedVerify] = useState<ElevatedVerify>({ state: 'unknown' });
+  useEffect(() => {
+    if (!routeResult || mode !== 'driving') {
+      setElevatedVerify({ state: 'unknown' });
+      return;
+    }
+    const ctrl = new AbortController();
+    setElevatedVerify({ state: 'checking' });
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    verifyElevatedTags(routeResult.coordinates, ctrl.signal)
+      .then(setElevatedVerify)
+      .catch(() => setElevatedVerify({ state: 'unknown' }));
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [routeResult, mode]);
 
   const handleModeChange = (newMode: TravelMode) => {
     setMode(newMode);
@@ -294,6 +354,18 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                 totalDistance={routeResult.totalDistance}
                 remaining={autoSpeech.remaining}
                 tracking={autoSpeech.tracking}
+              />
+            )}
+
+            {/* Elevated hierarchy badge (driving only) */}
+            {mode === 'driving' && elevatedInfo && (
+              <ElevatedBadge
+                info={elevatedInfo}
+                liveLevel={liveLevel}
+                tracking={autoSpeech.tracking}
+                junctions={junctions}
+                remaining={autoSpeech.remaining}
+                verify={elevatedVerify}
               />
             )}
 
