@@ -435,7 +435,13 @@ export default function App() {
 
       {/* Floating Spot Detail Card (Bottom left / bottom center) */}
       {clickedLocation && !isMeasuring && (
-        <div className="absolute bottom-10 left-3 sm:left-4 z-30 pointer-events-auto max-w-sm w-[calc(100%-1.5rem)] sm:w-96">
+        <div
+          className={`absolute bottom-10 pointer-events-auto max-w-sm ${
+            activePanel !== 'none'
+              ? 'left-3 right-14 z-50 sm:left-[25rem] sm:right-auto sm:w-[calc(100vw-26.5rem)]'
+              : 'left-3 sm:left-4 z-30 w-[calc(100%-1.5rem)] sm:w-96'
+          }`}
+        >
           <SpotDetailCard
             location={clickedLocation}
             existingSpot={selectedSpot}
