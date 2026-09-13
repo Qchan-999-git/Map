@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { DriverProfile, GeoPoint, RouteResult, TravelMode } from '../types';
-import { DRIVER_PROFILES } from '../data/driverProfiles';
+import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
+import { LaneGuidanceCard } from './LaneGuidanceCard';
+import { buildLaneAdvices } from '../services/laneGuidance';
 import { formatDistance, formatDuration } from '../services/mapService';
 
 interface RoutePanelProps {
@@ -36,6 +38,12 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   onClose,
 }) => {
   const [mode, setMode] = useState<TravelMode>('driving');
+
+  const laneAdvices = useMemo(
+    () => (routeResult ? buildLaneAdvices(routeResult.steps, driverProfile) : []),
+    [routeResult, driverProfile]
+  );
+  const earlyMeters = getDriverProfileConfig(driverProfile).earlyGuidanceMeters;
 
   const handleModeChange = (newMode: TravelMode) => {
     setMode(newMode);
@@ -247,6 +255,15 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {routeResult ? (
           <>
+            {/* Early lane guidance (driving only, hands-free) */}
+            {mode === 'driving' && laneAdvices.length > 0 && routeResult && (
+              <LaneGuidanceCard
+                advices={laneAdvices}
+                earlyMeters={earlyMeters}
+                routeCoordinates={routeResult.coordinates}
+              />
+            )}
+
             {/* Summary card */}
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 p-4 rounded-2xl border border-blue-100/90 shadow-sm">
               <div className="flex items-center justify-between">
