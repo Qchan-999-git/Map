@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Loader2, MapPin } from 'lucide-react';
 import { SearchResultItem } from '../types';
