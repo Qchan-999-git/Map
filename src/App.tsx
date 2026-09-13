@@ -57,6 +57,7 @@ export default function App() {
 
   // Panels & Tools
   const [activePanel, setActivePanel] = useState<'none' | 'route' | 'spots'>('none');
+  const [isDriving, setIsDriving] = useState(false);
 
   // Route Planning State
   const [routeStart, setRouteStart] = useState<GeoPoint | null>(null);
@@ -363,6 +364,7 @@ export default function App() {
         routeEnd={routeEnd}
         isMeasuring={isMeasuring}
         measurePoints={measurePoints}
+        isDriving={isDriving}
         onMapClick={handleMapClick}
         onSpotClick={handleSpotClick}
         onMapMove={handleMapMove}
@@ -423,6 +425,7 @@ export default function App() {
               onCalculateRoute={handleCalculateRoute}
               onClearRoute={handleClearRoute}
               onClose={() => setActivePanel('none')}
+              onDriveModeChange={setIsDriving}
             />
           )}
 
@@ -458,7 +461,7 @@ export default function App() {
       )}
 
       {/* Floating Measurement HUD (Top center when active) */}
-      {isMeasuring && (
+      {isMeasuring && !isDriving && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-30 pointer-events-auto px-3 w-full max-w-sm">
           <MeasurementHUD
             totalDistance={measureDistance}
@@ -474,7 +477,7 @@ export default function App() {
       )}
 
       {/* Floating Spot Detail Card (Bottom left / bottom center) */}
-      {clickedLocation && !isMeasuring && (
+      {clickedLocation && !isMeasuring && !isDriving && (
         <div className="absolute bottom-10 left-3 sm:left-4 z-30 pointer-events-auto max-w-sm w-[calc(100%-1.5rem)] sm:w-96">
           <SpotDetailCard
             location={clickedLocation}
