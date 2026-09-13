@@ -1,13 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Volume2, VolumeX, ArrowRight, ArrowLeft, ArrowUp, GitMerge, Navigation, Square } from 'lucide-react';
 import { LaneAdvice, speakAdvice } from '../services/laneGuidance';
-import { useAutoLaneSpeech } from '../hooks/useAutoLaneSpeech';
 import { formatDistance } from '../services/mapService';
 
 interface LaneGuidanceCardProps {
   advices: LaneAdvice[];
   earlyMeters: number;
   routeCoordinates: [number, number][];
+  tracking: boolean;
+  remaining: Map<number, number>;
+  voiceOn: boolean;
+  onToggleVoice: () => void;
+  onStartTracking: () => void;
+  onStopTracking: () => void;
+  trackError: string | null;
 }
 
 function DirectionIcon({ dir }: { dir: LaneAdvice['direction'] }) {
@@ -40,16 +46,14 @@ function directionColor(dir: LaneAdvice['direction']): string {
 export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
   advices,
   earlyMeters,
-  routeCoordinates,
+  tracking,
+  remaining,
+  voiceOn,
+  onToggleVoice,
+  onStartTracking,
+  onStopTracking,
+  trackError,
 }) => {
-  const [voiceOn, setVoiceOn] = useState(true);
-  const { tracking, error, remaining, start, stop } = useAutoLaneSpeech(
-    advices,
-    routeCoordinates,
-    voiceOn,
-    earlyMeters
-  );
-
   // Hands-free: announce first guidance once right after search (no tap)
   useEffect(() => {
     if (!voiceOn || advices.length === 0) return;
@@ -71,7 +75,7 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
         </div>
         <button
           id="lane-voice-toggle-btn"
-          onClick={() => setVoiceOn((v) => !v)}
+          onClick={onToggleVoice}
           className={`p-1.5 rounded-lg border transition-colors ${
             voiceOn
               ? 'bg-emerald-600 text-white border-emerald-600'
@@ -87,7 +91,7 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
         {!tracking ? (
           <button
             id="lane-tracking-start-btn"
-            onClick={start}
+            onClick={onStartTracking}
             className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
           >
             <Navigation size={14} />
@@ -96,7 +100,7 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
         ) : (
           <button
             id="lane-tracking-stop-btn"
-            onClick={stop}
+            onClick={onStopTracking}
             className="flex-1 py-2 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-600 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
           >
             <Square size={14} />
@@ -104,7 +108,7 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
           </button>
         )}
       </div>
-      {error && <div className="text-[11px] text-rose-600 mb-2">{error}</div>}
+      {trackError && <div className="text-[11px] text-rose-600 mb-2">{trackError}</div>}
       {tracking && (
         <div className="text-[11px] text-emerald-700 mb-2 font-semibold">
           GPS追跡中…残距離で自動読み上げします（操作不要）
@@ -130,13 +134,9 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
                 </div>
                 <div className="text-[11px] text-neutral-500 mt-0.5">
                   {rem !== undefined && tracking ? (
-                    <>
-                      あと{formatDistance(Math.max(rem, 0))}・手順{a.stepIndex + 1}
-                    </>
+                    <>あと{formatDistance(Math.max(rem, 0))}・手順{a.stepIndex + 1}</>
                   ) : (
-                    <>
-                      {formatDistance(a.distanceToManeuver)}先・手順{a.stepIndex + 1}
-                    </>
+                    <>{formatDistance(a.distanceToManeuver)}先・手順{a.stepIndex + 1}</>
                   )}
                   {a.roadName ? `・${a.roadName}` : ''}
                 </div>

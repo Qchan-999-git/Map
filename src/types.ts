@@ -62,6 +62,7 @@ export interface RouteStep {
   name: string;
   turnType?: 'right' | 'left' | 'straight' | 'merge' | 'ramp' | 'other';
   roadClass?: string;
+  location?: [number, number]; // [lat, lng] maneuver point
 }
 
 export interface RouteResult {
