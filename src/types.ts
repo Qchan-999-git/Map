@@ -1,5 +1,7 @@
 export type TravelMode = 'driving' | 'walking' | 'cycling';
 
+export type DriverProfile = 'standard' | 'beginner' | 'elderly' | 'yutori';
+
 export interface GeoPoint {
   lat: number;
   lng: number;
@@ -58,6 +60,8 @@ export interface RouteStep {
   distance: number; // meters
   duration: number; // seconds
   name: string;
+  turnType?: 'right' | 'left' | 'straight' | 'merge' | 'ramp' | 'other';
+  roadClass?: string;
 }
 
 export interface RouteResult {
@@ -66,6 +70,11 @@ export interface RouteResult {
   totalDuration: number; // seconds
   steps: RouteStep[];
   mode: TravelMode;
+  profile?: DriverProfile;
+  stressScore?: number;
+  rightTurnCount?: number;
+  leftTurnCount?: number;
+  alternatives?: RouteResult[];
 }
 
 export interface ClickedLocationInfo {

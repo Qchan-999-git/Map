@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2 } from 'lucide-react';
-import { GeoPoint, RouteResult, TravelMode } from '../types';
+import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { DriverProfile, GeoPoint, RouteResult, TravelMode } from '../types';
+import { DRIVER_PROFILES } from '../data/driverProfiles';
 import { formatDistance, formatDuration } from '../services/mapService';
 
 interface RoutePanelProps {
@@ -9,6 +10,8 @@ interface RoutePanelProps {
   routeResult: RouteResult | null;
   currentLocation: { lat: number; lng: number } | null;
   isLoading: boolean;
+  driverProfile: DriverProfile;
+  onChangeDriverProfile: (profile: DriverProfile) => void;
   onSetStart: (point: GeoPoint | null) => void;
   onSetEnd: (point: GeoPoint | null) => void;
   onSwapPoints: () => void;
@@ -23,6 +26,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   routeResult,
   currentLocation,
   isLoading,
+  driverProfile,
+  onChangeDriverProfile,
   onSetStart,
   onSetEnd,
   onSwapPoints,
@@ -68,6 +73,34 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 
       {/* Inputs & Travel Modes */}
       <div className="p-4 space-y-3.5 border-b border-neutral-100">
+        {/* Driver Profile Selector */}
+        <div>
+          <div className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+            <ShieldCheck size={14} className="text-emerald-600" />
+            <span>運転タイプ</span>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {DRIVER_PROFILES.map((p) => (
+              <button
+                key={p.id}
+                id={`driver-profile-${p.id}-btn`}
+                onClick={() => onChangeDriverProfile(p.id)}
+                title={p.description}
+                className={`py-1.5 px-1 rounded-lg text-xs font-semibold border transition-all ${
+                  driverProfile === p.id
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                    : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[11px] text-neutral-400 mt-1">
+            {DRIVER_PROFILES.find((p) => p.id === driverProfile)?.description}
+          </div>
+        </div>
+
         {/* Travel Mode Toggle */}
         <div className="flex bg-neutral-100 p-1 rounded-xl">
           <button
@@ -232,6 +265,30 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                   </div>
                 </div>
               </div>
+              {/* Yutori stress summary */}
+              {routeResult.profile && routeResult.profile !== 'standard' && (
+                <div className="mt-2.5 pt-2.5 border-t border-blue-100/80 flex items-center gap-2 text-[11px]">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">
+                    ゆとり適用:{' '}
+                    {routeResult.profile === 'beginner'
+                      ? '初心者'
+                      : routeResult.profile === 'elderly'
+                        ? '高齢者'
+                        : 'ゆとり優先'}
+                  </span>
+                  <span className="text-neutral-600">
+                    右折 {routeResult.rightTurnCount ?? 0}回・左折 {routeResult.leftTurnCount ?? 0}回
+                  </span>
+                  {routeResult.stressScore !== undefined && (
+                    <span className="text-neutral-500">ストレス {routeResult.stressScore}</span>
+                  )}
+                </div>
+              )}
+              {routeResult.alternatives && routeResult.alternatives.length > 1 && (
+                <div className="mt-1.5 text-[11px] text-neutral-500">
+                  {routeResult.alternatives.length}案から低ストレス順に選択
+                </div>
+              )}
             </div>
 
             {/* Directions List */}
