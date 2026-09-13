@@ -217,12 +217,16 @@ export async function calculateRoute(
             instruction = `${type}${mod} ${s.name ? `on ${s.name}` : ''}`;
           }
           const turnType = detectTurnType(s.maneuver?.type, s.maneuver?.modifier);
+          const loc = s.maneuver?.location;
+          const location: [number, number] | undefined =
+            Array.isArray(loc) && loc.length >= 2 ? [loc[1], loc[0]] : undefined;
           return {
             instruction: translateInstruction(instruction || '進む'),
             distance: s.distance || 0,
             duration: s.duration || 0,
             name: s.name || '',
             turnType,
+            location,
           };
         });
 

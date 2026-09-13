@@ -346,6 +346,39 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       layer.addLayer(endMarker);
     }
 
+    // Merge / Shuto points (orange) — driving only
+    if (routeResult.mode === 'driving') {
+      routeResult.steps.forEach((step) => {
+        if ((step.turnType === 'merge' || step.turnType === 'ramp') && step.location) {
+          const isShuto = /首都高|C1|C2|湾岸|上野線|渋谷線|新宿線|池袋線|八重洲線|都心環状|中央環状/i.test(
+            `${step.name} ${step.instruction}`
+          );
+          const html = `
+            <div class="w-6 h-6 rounded-full ${isShuto ? 'bg-orange-600' : 'bg-amber-500'} text-white flex items-center justify-center shadow-lg border-2 border-white">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m8 6 4-4 4 4"></path>
+                <path d="M12 2v10.3"></path>
+                <path d="m20 22-4-4-4 4"></path>
+                <path d="M16 18v-9"></path>
+              </svg>
+            </div>
+          `;
+          const icon = L.divIcon({
+            className: 'merge-pin',
+            html,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          });
+          const marker = L.marker(step.location, { icon });
+          marker.bindTooltip(
+            `${isShuto ? '首都高・' : ''}合流${step.name ? `：${step.name}` : ''}`,
+            { direction: 'top', offset: [0, -12] }
+          );
+          layer.addLayer(marker);
+        }
+      });
+    }
+
     // Fit route bounds nicely with padding
     const bounds = L.latLngBounds(routeResult.coordinates);
     map.fitBounds(bounds, {

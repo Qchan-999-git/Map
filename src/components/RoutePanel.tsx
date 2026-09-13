@@ -3,7 +3,10 @@ import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, Che
 import { DriverProfile, GeoPoint, RouteResult, TravelMode } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
 import { LaneGuidanceCard } from './LaneGuidanceCard';
+import { ShutoMergeAssist } from './ShutoMergeAssist';
 import { buildLaneAdvices } from '../services/laneGuidance';
+import { useAutoLaneSpeech } from '../hooks/useAutoLaneSpeech';
+import { findMerges } from '../services/shutoAssist';
 import { formatDistance, formatDuration } from '../services/mapService';
 
 interface RoutePanelProps {
@@ -38,12 +41,25 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   onClose,
 }) => {
   const [mode, setMode] = useState<TravelMode>('driving');
+  const [voiceOn, setVoiceOn] = useState(true);
 
   const laneAdvices = useMemo(
     () => (routeResult ? buildLaneAdvices(routeResult.steps, driverProfile) : []),
     [routeResult, driverProfile]
   );
+  const merges = useMemo(
+    () => (routeResult ? findMerges(routeResult.steps) : []),
+    [routeResult]
+  );
   const earlyMeters = getDriverProfileConfig(driverProfile).earlyGuidanceMeters;
+
+  // Single shared GPS watch for lane + shuto auto guidance (hands-free)
+  const autoSpeech = useAutoLaneSpeech(
+    laneAdvices,
+    routeResult?.coordinates ?? [],
+    voiceOn && mode === 'driving' && laneAdvices.length > 0,
+    earlyMeters
+  );
 
   const handleModeChange = (newMode: TravelMode) => {
     setMode(newMode);
@@ -255,12 +271,29 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {routeResult ? (
           <>
-            {/* Early lane guidance (driving only, hands-free) */}
+            {/* Early lane guidance (driving only, hands-free, shared GPS) */}
             {mode === 'driving' && laneAdvices.length > 0 && routeResult && (
               <LaneGuidanceCard
                 advices={laneAdvices}
                 earlyMeters={earlyMeters}
                 routeCoordinates={routeResult.coordinates}
+                tracking={autoSpeech.tracking}
+                remaining={autoSpeech.remaining}
+                voiceOn={voiceOn}
+                onToggleVoice={() => setVoiceOn((v) => !v)}
+                onStartTracking={autoSpeech.start}
+                onStopTracking={autoSpeech.stop}
+                trackError={autoSpeech.error}
+              />
+            )}
+
+            {/* Shuto / merge assist (driving only, live remaining) */}
+            {mode === 'driving' && merges.length > 0 && routeResult && (
+              <ShutoMergeAssist
+                merges={merges}
+                totalDistance={routeResult.totalDistance}
+                remaining={autoSpeech.remaining}
+                tracking={autoSpeech.tracking}
               />
             )}
 
