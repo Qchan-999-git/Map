@@ -5,6 +5,8 @@ import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles'
 import { LaneGuidanceCard } from './LaneGuidanceCard';
 import { ShutoMergeAssist } from './ShutoMergeAssist';
 import { ElevatedBadge } from './ElevatedBadge';
+import { TimeRestrictionCard } from './TimeRestrictionCard';
+import { checkTimeRestrictions } from '../services/timeRestriction';
 import { DriveModeCard } from './DriveModeCard';
 import { buildLaneAdvices, speakAdvice } from '../services/laneGuidance';
 import { useAutoLaneSpeech } from '../hooks/useAutoLaneSpeech';
@@ -77,6 +79,21 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
     [routeResult]
   );
   const earlyMeters = getDriverProfileConfig(driverProfile).earlyGuidanceMeters;
+
+  // 時間通行止めチェック（1分ごとに再評価・初心者向け簡易表示）
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  const timeStatuses = useMemo(
+    () => checkTimeRestrictions(routeResult, new Date(nowTick)),
+    [routeResult, nowTick]
+  );
+  const nowLabel = useMemo(() => {
+    const d = new Date(nowTick);
+    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }, [nowTick]);
 
   // Single shared GPS watch for lane + shuto auto guidance (hands-free)
   const autoSpeech = useAutoLaneSpeech(
@@ -380,6 +397,9 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 
       {/* Results / Step-by-Step Directions */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Time-based closure check (always visible: school zone / Ginza hokoten / timed no-right-turn) */}
+        <TimeRestrictionCard statuses={timeStatuses} nowLabel={nowLabel} />
+
         {routeResult ? (
           <>
             {/* Early lane guidance (driving only, hands-free, shared GPS) */}
