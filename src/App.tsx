@@ -8,6 +8,7 @@ import { SpotDetailCard } from './components/SpotDetailCard';
 import { MeasurementHUD } from './components/MeasurementHUD';
 import { MapControls } from './components/MapControls';
 import { MAP_LAYERS, INITIAL_SAVED_SPOTS } from './data/mapLayers';
+import { VEHICLE_PROFILES } from './data/vehicleProfiles';
 import {
   ClickedLocationInfo,
   GeoPoint,
@@ -16,6 +17,7 @@ import {
   SavedSpot,
   SearchResultItem,
   TravelMode,
+  VehicleType,
 } from './types';
 import {
   calculateHaversineDistance,
@@ -60,6 +62,9 @@ export default function App() {
   const [routeEnd, setRouteEnd] = useState<GeoPoint | null>(null);
   const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
   const [isRoutingLoading, setIsRoutingLoading] = useState(false);
+
+  // Vehicle type (運転特性ベースの分類)
+  const [vehicleType, setVehicleType] = useState<VehicleType>('standard');
 
   // Measurement Tool State
   const [isMeasuring, setIsMeasuring] = useState(false);
@@ -174,12 +179,12 @@ export default function App() {
   };
 
   // Route calculation
-  const handleCalculateRoute = async (mode: TravelMode = 'driving') => {
+  const handleCalculateRoute = async (mode: TravelMode = 'driving', vehicle: VehicleType = vehicleType) => {
     if (!routeStart || !routeEnd) return;
     setIsRoutingLoading(true);
 
     try {
-      const result = await calculateRoute([routeStart.lat, routeStart.lng], [routeEnd.lat, routeEnd.lng], mode);
+      const result = await calculateRoute([routeStart.lat, routeStart.lng], [routeEnd.lat, routeEnd.lng], mode, vehicle);
       setRouteResult(result);
       showToast('ルートを検索しました', 'success');
     } catch (err) {
@@ -190,12 +195,21 @@ export default function App() {
     }
   };
 
+  // Vehicle type change (route があれば再計算して注意点を更新)
+  const handleVehicleTypeChange = (vehicle: VehicleType) => {
+    setVehicleType(vehicle);
+    if (routeResult || (routeStart && routeEnd)) {
+      handleCalculateRoute(routeResult?.mode ?? 'driving', vehicle);
+    }
+    showToast(`車種を「${VEHICLE_PROFILES[vehicle].name}」に切り替えました`, 'info');
+  };
+
   const handleSwapRoutePoints = () => {
     const temp = routeStart;
     setRouteStart(routeEnd);
     setRouteEnd(temp);
     if (routeResult && routeEnd && temp) {
-      handleCalculateRoute(routeResult.mode);
+      handleCalculateRoute(routeResult.mode, vehicleType);
     }
   };
 
@@ -355,6 +369,8 @@ export default function App() {
               routeResult={routeResult}
               currentLocation={currentLocation}
               isLoading={isRoutingLoading}
+              vehicleType={vehicleType}
+              onVehicleTypeChange={handleVehicleTypeChange}
               onSetStart={(pt) => {
                 setRouteStart(pt);
                 if (pt && routeEnd) handleCalculateRoute();

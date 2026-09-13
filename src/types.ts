@@ -1,5 +1,20 @@
 export type TravelMode = 'driving' | 'walking' | 'cycling';
 
+// 車種情報 ※「見た目のボディタイプ」ではなく「運転特性」で分類する
+export type VehicleType = 'kei' | 'standard' | 'large' | 'truck' | 'motorcycle';
+
+export type VehicleDifficulty = 'easy' | 'standard' | 'challenging' | 'hard';
+
+export interface VehicleProfile {
+  type: VehicleType;
+  name: string;
+  group: string;
+  description: string;
+  difficulty: VehicleDifficulty;
+  cautions: string[];
+  speedFactor: number;
+}
+
 export interface GeoPoint {
   lat: number;
   lng: number;
@@ -66,6 +81,8 @@ export interface RouteResult {
   totalDuration: number; // seconds
   steps: RouteStep[];
   mode: TravelMode;
+  vehicleType?: VehicleType;
+  cautions?: string[]; // 車種・走行モード別の運転注意ポイント
 }
 
 export interface ClickedLocationInfo {

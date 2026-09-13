@@ -1,4 +1,5 @@
-import { ClickedLocationInfo, RouteResult, SearchResultItem, TravelMode } from '../types';
+import { ClickedLocationInfo, RouteResult, SearchResultItem, TravelMode, VehicleType } from '../types';
+import { VEHICLE_PROFILES } from '../data/vehicleProfiles';
 
 /**
  * Calculates distance between two LatLng points using the Haversine formula (in meters).
@@ -176,7 +177,8 @@ export async function getLocationDetails(lat: number, lng: number): Promise<Clic
 export async function calculateRoute(
   start: [number, number],
   end: [number, number],
-  mode: TravelMode = 'driving'
+  mode: TravelMode = 'driving',
+  vehicleType: VehicleType = 'standard'
 ): Promise<RouteResult> {
   const profileMap: Record<TravelMode, string> = {
     driving: 'driving',
@@ -185,6 +187,10 @@ export async function calculateRoute(
   };
 
   const profile = profileMap[mode];
+  // 車種に応じた運転注意ポイント（車で走行する場合のみ）
+  const cautions =
+    mode === 'driving' ? [...VEHICLE_PROFILES[vehicleType].cautions] : [];
+  const resultVehicleType = mode === 'driving' ? vehicleType : undefined;
   // OSRM expects coordinates as: lng,lat ; lng,lat
   const url = `https://router.project-osrm.org/route/v1/${profile}/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
 
@@ -221,6 +227,8 @@ export async function calculateRoute(
         totalDuration: route.duration,
         steps,
         mode,
+        vehicleType: resultVehicleType,
+        cautions,
       };
     }
   } catch (err) {
@@ -234,20 +242,23 @@ export async function calculateRoute(
     walking: 1.25, // ~4.5 km/h
     cycling: 4.16, // ~15 km/h
   };
+  const speedFactor = mode === 'driving' ? VEHICLE_PROFILES[vehicleType].speedFactor : 1;
 
   return {
     coordinates: [start, end],
     totalDistance: dist,
-    totalDuration: dist / speedMps[mode],
+    totalDuration: dist / (speedMps[mode] * speedFactor),
     steps: [
       {
         instruction: '出発地点から目的地へ向かいます',
         distance: dist,
-        duration: dist / speedMps[mode],
+        duration: dist / (speedMps[mode] * speedFactor),
         name: '直線推計ルート',
       },
     ],
     mode,
+    vehicleType: resultVehicleType,
+    cautions,
   };
 }
 
