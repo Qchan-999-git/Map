@@ -10,6 +10,7 @@ import { MapControls } from './components/MapControls';
 import { MAP_LAYERS, INITIAL_SAVED_SPOTS } from './data/mapLayers';
 import {
   ClickedLocationInfo,
+  DriverProfile,
   GeoPoint,
   MapLayerConfig,
   RouteResult,
@@ -17,6 +18,7 @@ import {
   SearchResultItem,
   TravelMode,
 } from './types';
+import { DEFAULT_DRIVER_PROFILE } from './data/driverProfiles';
 import {
   calculateHaversineDistance,
   calculateRoute,
@@ -25,6 +27,7 @@ import {
 import { Map as MapIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const SAVED_SPOTS_STORAGE_KEY = 'map_app_saved_spots_v1';
+const DRIVER_PROFILE_STORAGE_KEY = 'map_app_driver_profile_v1';
 
 export default function App() {
   // Base map layer state
@@ -60,6 +63,24 @@ export default function App() {
   const [routeEnd, setRouteEnd] = useState<GeoPoint | null>(null);
   const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
   const [isRoutingLoading, setIsRoutingLoading] = useState(false);
+
+  // Driver profile state with localStorage initialization
+  const [driverProfile, setDriverProfile] = useState<DriverProfile>(() => {
+    try {
+      const stored = localStorage.getItem(DRIVER_PROFILE_STORAGE_KEY);
+      if (
+        stored === 'standard' ||
+        stored === 'beginner' ||
+        stored === 'elderly' ||
+        stored === 'yutori'
+      ) {
+        return stored;
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_DRIVER_PROFILE;
+  });
 
   // Measurement Tool State
   const [isMeasuring, setIsMeasuring] = useState(false);
@@ -99,6 +120,15 @@ export default function App() {
       // ignore
     }
   }, [savedSpots]);
+
+  // Persist driver profile to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRIVER_PROFILE_STORAGE_KEY, driverProfile);
+    } catch {
+      // ignore
+    }
+  }, [driverProfile]);
 
   // Recalculate measurement distance when points change
   useEffect(() => {
@@ -173,20 +203,44 @@ export default function App() {
     setSearchMarker(null);
   };
 
-  // Route calculation
-  const handleCalculateRoute = async (mode: TravelMode = 'driving') => {
+  // Route calculation (driverProfile-aware)
+  const handleCalculateRoute = async (
+    mode: TravelMode = 'driving',
+    profileOverride?: DriverProfile
+  ) => {
     if (!routeStart || !routeEnd) return;
     setIsRoutingLoading(true);
+    const profile = profileOverride ?? driverProfile;
 
     try {
-      const result = await calculateRoute([routeStart.lat, routeStart.lng], [routeEnd.lat, routeEnd.lng], mode);
+      const result = await calculateRoute(
+        [routeStart.lat, routeStart.lng],
+        [routeEnd.lat, routeEnd.lng],
+        mode,
+        profile
+      );
       setRouteResult(result);
-      showToast('ルートを検索しました', 'success');
+      if (profile !== 'standard' && result.rightTurnCount !== undefined) {
+        showToast(
+          `ゆとりルート検索: 右折${result.rightTurnCount}回・ストレス${result.stressScore}`,
+          'success'
+        );
+      } else {
+        showToast('ルートを検索しました', 'success');
+      }
     } catch (err) {
       console.error(err);
       showToast('ルート検索に失敗しました', 'error');
     } finally {
       setIsRoutingLoading(false);
+    }
+  };
+
+  const handleChangeDriverProfile = async (p: DriverProfile) => {
+    setDriverProfile(p);
+    // Re-calculate active route with new profile for immediate feedback
+    if (routeStart && routeEnd) {
+      await handleCalculateRoute(routeResult?.mode ?? 'driving', p);
     }
   };
 
@@ -355,6 +409,8 @@ export default function App() {
               routeResult={routeResult}
               currentLocation={currentLocation}
               isLoading={isRoutingLoading}
+              driverProfile={driverProfile}
+              onChangeDriverProfile={handleChangeDriverProfile}
               onSetStart={(pt) => {
                 setRouteStart(pt);
                 if (pt && routeEnd) handleCalculateRoute();
