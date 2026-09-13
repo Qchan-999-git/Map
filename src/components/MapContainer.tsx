@@ -285,19 +285,26 @@ export const MapContainer: React.FC<MapContainerProps> = ({
 
     if (!routeResult || routeResult.coordinates.length < 2) return;
 
-    // Outer glow / casing line
+    // Highway vs surface styling to prevent elevated/under confusion
+    const usesHighway =
+      routeResult.mode === 'driving' &&
+      routeResult.steps.some((s) =>
+        /高速|首都高|自動車道|有料道路|C1|C2|湾岸|環状線/i.test(`${s.name} ${s.instruction}`)
+      );
+
+    // Outer glow / casing line (thicker shadow for highway)
     const casingPolyline = L.polyline(routeResult.coordinates, {
-      color: '#1e3a8a',
-      weight: 7,
+      color: usesHighway ? '#0c4a6e' : '#1e3a8a',
+      weight: usesHighway ? 9 : 7,
       opacity: 0.8,
       lineCap: 'round',
       lineJoin: 'round',
     });
     layer.addLayer(casingPolyline);
 
-    // Inner vibrant route line
+    // Inner vibrant route line (dashed for surface under elevated risk)
     const colorMap = {
-      driving: '#3b82f6',
+      driving: usesHighway ? '#0284c7' : '#3b82f6',
       walking: '#10b981',
       cycling: '#f59e0b',
     };
