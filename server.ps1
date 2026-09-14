@@ -26,8 +26,8 @@ Write-Host "============================================"
 # Edge を優先して開く（無ければ既定ブラウザ）
 $url = "http://localhost:$port/"
 $edgeCandidates = @(
-    "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe",
-    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+    "${env:ProgramFiles}\Microsoft\Edge\Application\msedge.exe"
 )
 $edgePath = $null
 foreach ($p in $edgeCandidates) {
