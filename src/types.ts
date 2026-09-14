@@ -2,6 +2,18 @@ export type TravelMode = 'driving' | 'walking' | 'cycling';
 
 export type DriverProfile = 'standard' | 'beginner' | 'elderly' | 'yutori';
 
+export type VehicleType = 'kei' | 'standard' | 'large' | 'truck' | 'motorcycle';
+
+export interface VehicleProfile {
+  type: VehicleType;
+  name: string;
+  group: string;
+  description: string;
+  difficulty: 'easy' | 'standard' | 'challenging' | 'hard';
+  cautions: string[];
+  speedFactor: number;
+}
+
 export interface GeoPoint {
   lat: number;
   lng: number;
