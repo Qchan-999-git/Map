@@ -8,17 +8,17 @@ import { SpotDetailCard } from './components/SpotDetailCard';
 import { MeasurementHUD } from './components/MeasurementHUD';
 import { MapControls } from './components/MapControls';
 import { MAP_LAYERS, INITIAL_SAVED_SPOTS } from './data/mapLayers';
-import { VEHICLE_PROFILES } from './data/vehicleProfiles';
 import {
   ClickedLocationInfo,
+  DriverProfile,
   GeoPoint,
   MapLayerConfig,
   RouteResult,
   SavedSpot,
   SearchResultItem,
   TravelMode,
-  VehicleType,
 } from './types';
+import { DEFAULT_DRIVER_PROFILE } from './data/driverProfiles';
 import {
   calculateHaversineDistance,
   calculateRoute,
@@ -27,6 +27,7 @@ import {
 import { Map as MapIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const SAVED_SPOTS_STORAGE_KEY = 'map_app_saved_spots_v1';
+const DRIVER_PROFILE_STORAGE_KEY = 'map_app_driver_profile_v1';
 
 export default function App() {
   // Base map layer state
@@ -56,6 +57,7 @@ export default function App() {
 
   // Panels & Tools
   const [activePanel, setActivePanel] = useState<'none' | 'route' | 'spots'>('none');
+  const [isDriving, setIsDriving] = useState(false);
 
   // Route Planning State
   const [routeStart, setRouteStart] = useState<GeoPoint | null>(null);
@@ -63,8 +65,23 @@ export default function App() {
   const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
   const [isRoutingLoading, setIsRoutingLoading] = useState(false);
 
-  // Vehicle type (運転特性ベースの分類)
-  const [vehicleType, setVehicleType] = useState<VehicleType>('standard');
+  // Driver profile state with localStorage initialization
+  const [driverProfile, setDriverProfile] = useState<DriverProfile>(() => {
+    try {
+      const stored = localStorage.getItem(DRIVER_PROFILE_STORAGE_KEY);
+      if (
+        stored === 'standard' ||
+        stored === 'beginner' ||
+        stored === 'elderly' ||
+        stored === 'yutori'
+      ) {
+        return stored;
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_DRIVER_PROFILE;
+  });
 
   // Measurement Tool State
   const [isMeasuring, setIsMeasuring] = useState(false);
@@ -104,6 +121,15 @@ export default function App() {
       // ignore
     }
   }, [savedSpots]);
+
+  // Persist driver profile to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRIVER_PROFILE_STORAGE_KEY, driverProfile);
+    } catch {
+      // ignore
+    }
+  }, [driverProfile]);
 
   // Recalculate measurement distance when points change
   useEffect(() => {
@@ -178,15 +204,31 @@ export default function App() {
     setSearchMarker(null);
   };
 
-  // Route calculation
-  const handleCalculateRoute = async (mode: TravelMode = 'driving', vehicle: VehicleType = vehicleType) => {
+  // Route calculation (driverProfile-aware)
+  const handleCalculateRoute = async (
+    mode: TravelMode = 'driving',
+    profileOverride?: DriverProfile
+  ) => {
     if (!routeStart || !routeEnd) return;
     setIsRoutingLoading(true);
+    const profile = profileOverride ?? driverProfile;
 
     try {
-      const result = await calculateRoute([routeStart.lat, routeStart.lng], [routeEnd.lat, routeEnd.lng], mode, vehicle);
+      const result = await calculateRoute(
+        [routeStart.lat, routeStart.lng],
+        [routeEnd.lat, routeEnd.lng],
+        mode,
+        profile
+      );
       setRouteResult(result);
-      showToast('ルートを検索しました', 'success');
+      if (profile !== 'standard' && result.rightTurnCount !== undefined) {
+        showToast(
+          `ゆとりルート検索: 右折${result.rightTurnCount}回・ストレス${result.stressScore}`,
+          'success'
+        );
+      } else {
+        showToast('ルートを検索しました', 'success');
+      }
     } catch (err) {
       console.error(err);
       showToast('ルート検索に失敗しました', 'error');
@@ -195,13 +237,12 @@ export default function App() {
     }
   };
 
-  // Vehicle type change (route があれば再計算して注意点を更新)
-  const handleVehicleTypeChange = (vehicle: VehicleType) => {
-    setVehicleType(vehicle);
-    if (routeResult || (routeStart && routeEnd)) {
-      handleCalculateRoute(routeResult?.mode ?? 'driving', vehicle);
+  const handleChangeDriverProfile = async (p: DriverProfile) => {
+    setDriverProfile(p);
+    // Re-calculate active route with new profile for immediate feedback
+    if (routeStart && routeEnd) {
+      await handleCalculateRoute(routeResult?.mode ?? 'driving', p);
     }
-    showToast(`車種を「${VEHICLE_PROFILES[vehicle].name}」に切り替えました`, 'info');
   };
 
   const handleSwapRoutePoints = () => {
@@ -209,7 +250,7 @@ export default function App() {
     setRouteStart(routeEnd);
     setRouteEnd(temp);
     if (routeResult && routeEnd && temp) {
-      handleCalculateRoute(routeResult.mode, vehicleType);
+      handleCalculateRoute(routeResult.mode);
     }
   };
 
@@ -323,6 +364,7 @@ export default function App() {
         routeEnd={routeEnd}
         isMeasuring={isMeasuring}
         measurePoints={measurePoints}
+        isDriving={isDriving}
         onMapClick={handleMapClick}
         onSpotClick={handleSpotClick}
         onMapMove={handleMapMove}
@@ -369,8 +411,8 @@ export default function App() {
               routeResult={routeResult}
               currentLocation={currentLocation}
               isLoading={isRoutingLoading}
-              vehicleType={vehicleType}
-              onVehicleTypeChange={handleVehicleTypeChange}
+              driverProfile={driverProfile}
+              onChangeDriverProfile={handleChangeDriverProfile}
               onSetStart={(pt) => {
                 setRouteStart(pt);
                 if (pt && routeEnd) handleCalculateRoute();
@@ -383,6 +425,7 @@ export default function App() {
               onCalculateRoute={handleCalculateRoute}
               onClearRoute={handleClearRoute}
               onClose={() => setActivePanel('none')}
+              onDriveModeChange={setIsDriving}
             />
           )}
 
@@ -418,7 +461,7 @@ export default function App() {
       )}
 
       {/* Floating Measurement HUD (Top center when active) */}
-      {isMeasuring && (
+      {isMeasuring && !isDriving && (
         <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-30 pointer-events-auto px-3 w-full max-w-sm">
           <MeasurementHUD
             totalDistance={measureDistance}
@@ -434,14 +477,8 @@ export default function App() {
       )}
 
       {/* Floating Spot Detail Card (Bottom left / bottom center) */}
-      {clickedLocation && !isMeasuring && (
-        <div
-          className={`absolute bottom-10 pointer-events-auto max-w-sm ${
-            activePanel !== 'none'
-              ? 'left-3 right-14 z-50 sm:left-[25rem] sm:right-auto sm:w-[calc(100vw-26.5rem)]'
-              : 'left-3 sm:left-4 z-30 w-[calc(100%-1.5rem)] sm:w-96'
-          }`}
-        >
+      {clickedLocation && !isMeasuring && !isDriving && (
+        <div className="absolute bottom-10 left-3 sm:left-4 z-30 pointer-events-auto max-w-sm w-[calc(100%-1.5rem)] sm:w-96">
           <SpotDetailCard
             location={clickedLocation}
             existingSpot={selectedSpot}

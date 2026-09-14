@@ -1,8 +1,25 @@
-import React, { useState } from 'react';
-import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { GeoPoint, RouteResult, TravelMode, VehicleDifficulty, VehicleType } from '../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { DriverProfile, GeoPoint, RouteResult, TravelMode } from '../types';
+import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
+import { LaneGuidanceCard } from './LaneGuidanceCard';
+import { ShutoMergeAssist } from './ShutoMergeAssist';
+import { ElevatedBadge } from './ElevatedBadge';
+import { TimeRestrictionCard } from './TimeRestrictionCard';
+import { checkTimeRestrictions } from '../services/timeRestriction';
+import { DriveModeCard } from './DriveModeCard';
+import { buildLaneAdvices, speakAdvice } from '../services/laneGuidance';
+import { useAutoLaneSpeech } from '../hooks/useAutoLaneSpeech';
+import { findMerges } from '../services/shutoAssist';
+import {
+  analyzeElevated,
+  computeHighwayRanges,
+  ElevatedVerify,
+  extractJunctions,
+  levelAt,
+  verifyElevatedTags,
+} from '../services/elevated';
 import { formatDistance, formatDuration } from '../services/mapService';
-import { VEHICLE_ICONS, VEHICLE_PROFILE_LIST, VEHICLE_PROFILES } from '../data/vehicleProfiles';
 
 interface RoutePanelProps {
   routeStart: GeoPoint | null;
@@ -10,37 +27,16 @@ interface RoutePanelProps {
   routeResult: RouteResult | null;
   currentLocation: { lat: number; lng: number } | null;
   isLoading: boolean;
-  vehicleType: VehicleType;
-  onVehicleTypeChange: (vehicle: VehicleType) => void;
+  driverProfile: DriverProfile;
+  onChangeDriverProfile: (profile: DriverProfile) => void;
   onSetStart: (point: GeoPoint | null) => void;
   onSetEnd: (point: GeoPoint | null) => void;
   onSwapPoints: () => void;
-  onCalculateRoute: (mode: TravelMode, vehicle: VehicleType) => void;
+  onCalculateRoute: (mode: TravelMode) => void;
   onClearRoute: () => void;
   onClose: () => void;
+  onDriveModeChange?: (driving: boolean) => void;
 }
-
-const DIFFICULTY_STYLES: Record<VehicleDifficulty, { label: string; className: string }> = {
-  easy: { label: '難易度：低', className: 'bg-emerald-100 text-emerald-700' },
-  standard: { label: '難易度：普通', className: 'bg-blue-100 text-blue-700' },
-  challenging: { label: '難易度：やや高', className: 'bg-amber-100 text-amber-700' },
-  hard: { label: '難易度：高', className: 'bg-rose-100 text-rose-700' },
-};
-
-const VehicleSummary: React.FC<{ vehicleType: VehicleType }> = ({ vehicleType }) => {
-  const profile = VEHICLE_PROFILES[vehicleType];
-  const Icon = VEHICLE_ICONS[vehicleType];
-  const diff = DIFFICULTY_STYLES[profile.difficulty];
-  return (
-    <div className="mt-2.5 pt-2.5 border-t border-blue-100/80 flex items-center gap-2">
-      <Icon size={14} className="text-blue-600" />
-      <span className="text-[11px] font-semibold text-neutral-700">{profile.name}</span>
-      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${diff.className}`}>
-        {diff.label}
-      </span>
-    </div>
-  );
-};
 
 export const RoutePanel: React.FC<RoutePanelProps> = ({
   routeStart,
@@ -48,22 +44,138 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   routeResult,
   currentLocation,
   isLoading,
-  vehicleType,
-  onVehicleTypeChange,
+  driverProfile,
+  onChangeDriverProfile,
   onSetStart,
   onSetEnd,
   onSwapPoints,
   onCalculateRoute,
   onClearRoute,
   onClose,
+  onDriveModeChange,
 }) => {
   const [mode, setMode] = useState<TravelMode>('driving');
+  const [voiceOn, setVoiceOn] = useState(true);
+  const [navMode, setNavMode] = useState<'plan' | 'drive'>('plan');
+
+  const laneAdvices = useMemo(
+    () => (routeResult ? buildLaneAdvices(routeResult.steps, driverProfile) : []),
+    [routeResult, driverProfile]
+  );
+  const merges = useMemo(
+    () => (routeResult ? findMerges(routeResult.steps) : []),
+    [routeResult]
+  );
+  const elevatedInfo = useMemo(
+    () => (routeResult ? analyzeElevated(routeResult.steps) : null),
+    [routeResult]
+  );
+  const highwayRanges = useMemo(
+    () => (routeResult ? computeHighwayRanges(routeResult.steps) : []),
+    [routeResult]
+  );
+  const junctions = useMemo(
+    () => (routeResult ? extractJunctions(routeResult.steps) : []),
+    [routeResult]
+  );
+  const earlyMeters = getDriverProfileConfig(driverProfile).earlyGuidanceMeters;
+
+  // 時間通行止めチェック（1分ごとに再評価・初心者向け簡易表示）
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  const timeStatuses = useMemo(
+    () => checkTimeRestrictions(routeResult, new Date(nowTick)),
+    [routeResult, nowTick]
+  );
+  const nowLabel = useMemo(() => {
+    const d = new Date(nowTick);
+    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }, [nowTick]);
+
+  // Single shared GPS watch for lane + shuto auto guidance (hands-free)
+  const autoSpeech = useAutoLaneSpeech(
+    laneAdvices,
+    routeResult?.coordinates ?? [],
+    voiceOn && mode === 'driving' && laneAdvices.length > 0,
+    earlyMeters
+  );
+
+  // Live elevated level from traveled distance
+  const liveLevel =
+    autoSpeech.tracking && highwayRanges.length > 0
+      ? levelAt(autoSpeech.traveledMeters, highwayRanges)
+      : null;
+
+  // Dedicated voice on highway/surface switch (no tap)
+  const prevLevelRef = useRef<'highway' | 'surface' | null>(null);
+  useEffect(() => {
+    if (!autoSpeech.tracking || !voiceOn || !liveLevel) return;
+    if (prevLevelRef.current !== null && prevLevelRef.current !== liveLevel) {
+      speakAdvice(
+        liveLevel === 'highway'
+          ? '高速に入りました。下道とお間違えなく。'
+          : '一般道に入りました。上の高速とは別ルートです。'
+      );
+    }
+    prevLevelRef.current = liveLevel;
+  }, [liveLevel, autoSpeech.tracking, voiceOn]);
+
+  // Overpass verification (bridge/tunnel) per route
+  const [elevatedVerify, setElevatedVerify] = useState<ElevatedVerify>({ state: 'unknown' });
+  useEffect(() => {
+    if (!routeResult || mode !== 'driving') {
+      setElevatedVerify({ state: 'unknown' });
+      return;
+    }
+    const ctrl = new AbortController();
+    setElevatedVerify({ state: 'checking' });
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    verifyElevatedTags(routeResult.coordinates, ctrl.signal)
+      .then(setElevatedVerify)
+      .catch(() => setElevatedVerify({ state: 'unknown' }));
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [routeResult, mode]);
 
   const handleModeChange = (newMode: TravelMode) => {
     setMode(newMode);
     if (routeStart && routeEnd) {
-      onCalculateRoute(newMode, vehicleType);
+      onCalculateRoute(newMode);
     }
+  };
+
+  const isDriving = navMode === 'drive';
+  useEffect(() => {
+    onDriveModeChange?.(isDriving);
+  }, [isDriving, onDriveModeChange]);
+
+  useEffect(() => {
+    if (!routeResult) setNavMode('plan');
+  }, [routeResult]);
+
+  const canDrive =
+    mode === 'driving' && routeResult !== null && laneAdvices.length > 0;
+
+  const handleStartDrive = () => {
+    if (!canDrive) return;
+    setNavMode('drive');
+    autoSpeech.start();
+  };
+
+  const handleExitDrive = () => {
+    autoSpeech.stop();
+    setNavMode('plan');
+  };
+
+  const handleClosePanel = () => {
+    if (isDriving) autoSpeech.stop();
+    setNavMode('plan');
+    onClose();
   };
 
   const handleUseCurrentLocationForStart = () => {
@@ -82,19 +194,65 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
       <div className="p-4 border-b border-neutral-200/80 flex items-center justify-between bg-neutral-50/70">
         <div className="flex items-center gap-2 font-bold text-base text-neutral-900">
           <Navigation size={20} className="text-blue-600" />
-          <span>ルート案内・経路検索</span>
+          <span>{isDriving ? '走行モード' : 'ルート案内・経路検索'}</span>
         </div>
         <button
           id="close-route-panel-btn"
-          onClick={onClose}
+          onClick={handleClosePanel}
           className="p-1 rounded-full text-neutral-400 hover:text-neutral-700 hover:bg-neutral-200/60 transition-colors"
         >
           <X size={18} />
         </button>
       </div>
 
+      {isDriving ? (
+        <div className="flex-1 flex min-h-0">
+          <DriveModeCard
+            advices={laneAdvices}
+            remaining={autoSpeech.remaining}
+            tracking={autoSpeech.tracking}
+            earlyMeters={earlyMeters}
+            liveLevel={liveLevel}
+            merges={merges}
+            junctions={junctions}
+            voiceOn={voiceOn}
+            onToggleVoice={() => setVoiceOn((v) => !v)}
+            onExitDrive={handleExitDrive}
+            trackError={autoSpeech.error}
+          />
+        </div>
+      ) : (
+        <>
       {/* Inputs & Travel Modes */}
       <div className="p-4 space-y-3.5 border-b border-neutral-100">
+        {/* Driver Profile Selector */}
+        <div>
+          <div className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+            <ShieldCheck size={14} className="text-emerald-600" />
+            <span>運転タイプ</span>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {DRIVER_PROFILES.map((p) => (
+              <button
+                key={p.id}
+                id={`driver-profile-${p.id}-btn`}
+                onClick={() => onChangeDriverProfile(p.id)}
+                title={p.description}
+                className={`py-1.5 px-1 rounded-lg text-xs font-semibold border transition-all ${
+                  driverProfile === p.id
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                    : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[11px] text-neutral-400 mt-1">
+            {DRIVER_PROFILES.find((p) => p.id === driverProfile)?.description}
+          </div>
+        </div>
+
         {/* Travel Mode Toggle */}
         <div className="flex bg-neutral-100 p-1 rounded-xl">
           <button
@@ -134,40 +292,6 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
             <span>自転車</span>
           </button>
         </div>
-
-        {/* Vehicle Type Selector (車種＝運転特性ベース) */}
-        {mode === 'driving' && (
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="text-[10px] text-neutral-400 font-semibold uppercase">車種（運転特性）</div>
-            </div>
-            <div className="grid grid-cols-5 gap-1.5">
-              {VEHICLE_PROFILE_LIST.map((profile) => {
-                const Icon = VEHICLE_ICONS[profile.type];
-                const active = vehicleType === profile.type;
-                return (
-                  <button
-                    key={profile.type}
-                    id={`vehicle-${profile.type}-btn`}
-                    onClick={() => onVehicleTypeChange(profile.type)}
-                    title={profile.description}
-                    className={`flex flex-col items-center gap-1 py-1.5 px-0.5 rounded-lg border text-[10px] font-semibold leading-tight text-center transition-all ${
-                      active
-                        ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
-                        : 'border-neutral-200 bg-white text-neutral-500 hover:bg-neutral-50'
-                    }`}
-                  >
-                    <Icon size={15} />
-                    <span>{profile.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-1.5 text-[10px] text-neutral-500 leading-snug">
-              {VEHICLE_PROFILES[vehicleType].description}
-            </p>
-          </div>
-        )}
 
         {/* Start & End Inputs */}
         <div className="relative flex items-center gap-2">
@@ -243,7 +367,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
           <button
             id="compute-route-btn"
             disabled={!routeStart || !routeEnd || isLoading}
-            onClick={() => onCalculateRoute(mode, vehicleType)}
+            onClick={() => onCalculateRoute(mode)}
             className="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-neutral-200 disabled:text-neutral-400 text-white font-semibold text-xs shadow-md transition-all flex items-center justify-center gap-2"
           >
             {isLoading ? (
@@ -273,9 +397,60 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 
       {/* Results / Step-by-Step Directions */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Time-based closure check (always visible: school zone / Ginza hokoten / timed no-right-turn) */}
+        <TimeRestrictionCard statuses={timeStatuses} nowLabel={nowLabel} />
+
         {routeResult ? (
           <>
+            {/* Early lane guidance (driving only, hands-free, shared GPS) */}
+            {mode === 'driving' && laneAdvices.length > 0 && routeResult && (
+              <LaneGuidanceCard
+                advices={laneAdvices}
+                earlyMeters={earlyMeters}
+                routeCoordinates={routeResult.coordinates}
+                tracking={autoSpeech.tracking}
+                remaining={autoSpeech.remaining}
+                voiceOn={voiceOn}
+                onToggleVoice={() => setVoiceOn((v) => !v)}
+                onStartTracking={autoSpeech.start}
+                onStopTracking={autoSpeech.stop}
+                trackError={autoSpeech.error}
+              />
+            )}
+
+            {/* Shuto / merge assist (driving only, live remaining) */}
+            {mode === 'driving' && merges.length > 0 && routeResult && (
+              <ShutoMergeAssist
+                merges={merges}
+                totalDistance={routeResult.totalDistance}
+                remaining={autoSpeech.remaining}
+                tracking={autoSpeech.tracking}
+              />
+            )}
+
+            {/* Elevated hierarchy badge (driving only) */}
+            {mode === 'driving' && elevatedInfo && (
+              <ElevatedBadge
+                info={elevatedInfo}
+                liveLevel={liveLevel}
+                tracking={autoSpeech.tracking}
+                junctions={junctions}
+                remaining={autoSpeech.remaining}
+                verify={elevatedVerify}
+              />
+            )}
+
             {/* Summary card */}
+            {canDrive && (
+              <button
+                id="start-drive-mode-btn"
+                onClick={handleStartDrive}
+                className="w-full py-3 px-4 rounded-2xl bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 min-h-[44px]"
+              >
+                <Navigation size={16} />
+                <span>走行開始（Next1件表示に切替）</span>
+              </button>
+            )}
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 p-4 rounded-2xl border border-blue-100/90 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
@@ -293,28 +468,31 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                   </div>
                 </div>
               </div>
-              {routeResult.mode === 'driving' && routeResult.vehicleType && (
-                <VehicleSummary vehicleType={routeResult.vehicleType} />
+              {/* Yutori stress summary */}
+              {routeResult.profile && routeResult.profile !== 'standard' && (
+                <div className="mt-2.5 pt-2.5 border-t border-blue-100/80 flex items-center gap-2 text-[11px]">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">
+                    ゆとり適用:{' '}
+                    {routeResult.profile === 'beginner'
+                      ? '初心者'
+                      : routeResult.profile === 'elderly'
+                        ? '高齢者'
+                        : 'ゆとり優先'}
+                  </span>
+                  <span className="text-neutral-600">
+                    右折 {routeResult.rightTurnCount ?? 0}回・左折 {routeResult.leftTurnCount ?? 0}回
+                  </span>
+                  {routeResult.stressScore !== undefined && (
+                    <span className="text-neutral-500">ストレス {routeResult.stressScore}</span>
+                  )}
+                </div>
+              )}
+              {routeResult.alternatives && routeResult.alternatives.length > 1 && (
+                <div className="mt-1.5 text-[11px] text-neutral-500">
+                  {routeResult.alternatives.length}案から低ストレス順に選択
+                </div>
               )}
             </div>
-
-            {/* Vehicle Cautions */}
-            {routeResult.cautions && routeResult.cautions.length > 0 && (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
-                <div className="text-xs font-bold text-amber-800 flex items-center gap-1.5 mb-2">
-                  <AlertTriangle size={14} className="text-amber-500" />
-                  <span>運転注意ポイント</span>
-                </div>
-                <ul className="space-y-1.5">
-                  {routeResult.cautions.map((c, idx) => (
-                    <li key={idx} className="flex gap-1.5 text-[11px] text-neutral-700 leading-snug">
-                      <span className="text-amber-500 flex-shrink-0 mt-px">•</span>
-                      <span>{c}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
 
             {/* Directions List */}
             <div>
@@ -363,6 +541,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };

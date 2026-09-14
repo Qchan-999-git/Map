@@ -1,5 +1,5 @@
-import { ClickedLocationInfo, RouteResult, SearchResultItem, TravelMode, VehicleType } from '../types';
-import { VEHICLE_PROFILES } from '../data/vehicleProfiles';
+import { ClickedLocationInfo, DriverProfile, RouteResult, RouteStep, SearchResultItem, TravelMode } from '../types';
+import { getDriverProfileConfig } from '../data/driverProfiles';
 
 /**
  * Calculates distance between two LatLng points using the Haversine formula (in meters).
@@ -172,13 +172,15 @@ export async function getLocationDetails(lat: number, lng: number): Promise<Clic
 }
 
 /**
- * Calculates real-world route using OSRM with turn-by-turn steps
+ * Calculates real-world route using OSRM with turn-by-turn steps.
+ * When driverProfile is beginner/elderly/yutori, fetches up to 3 alternatives
+ * and selects the lowest-stress route (right-turn avoidance, trunk priority).
  */
 export async function calculateRoute(
   start: [number, number],
   end: [number, number],
   mode: TravelMode = 'driving',
-  vehicleType: VehicleType = 'standard'
+  driverProfile: DriverProfile = 'standard'
 ): Promise<RouteResult> {
   const profileMap: Record<TravelMode, string> = {
     driving: 'driving',
@@ -187,12 +189,11 @@ export async function calculateRoute(
   };
 
   const profile = profileMap[mode];
-  // 車種に応じた運転注意ポイント（車で走行する場合のみ）
-  const cautions =
-    mode === 'driving' ? [...VEHICLE_PROFILES[vehicleType].cautions] : [];
-  const resultVehicleType = mode === 'driving' ? vehicleType : undefined;
+  const wantAlternatives = mode === 'driving' && driverProfile !== 'standard';
   // OSRM expects coordinates as: lng,lat ; lng,lat
-  const url = `https://router.project-osrm.org/route/v1/${profile}/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`;
+  const url =
+    `https://router.project-osrm.org/route/v1/${profile}/${start[1]},${start[0]};${end[1]},${end[0]}` +
+    `?overview=full&geometries=geojson&steps=true${wantAlternatives ? '&alternatives=3' : ''}`;
 
   try {
     const res = await fetch(url);
@@ -200,35 +201,75 @@ export async function calculateRoute(
     const data = await res.json();
 
     if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-      const route = data.routes[0];
-      // Geometry coordinates are [lng, lat] -> convert to [lat, lng]
-      const coordinates: [number, number][] = route.geometry.coordinates.map(
-        (c: [number, number]) => [c[1], c[0]]
-      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const candidates: RouteResult[] = (data.routes as any[]).map((route) => {
+        // Geometry coordinates are [lng, lat] -> convert to [lat, lng]
+        const coordinates: [number, number][] = route.geometry.coordinates.map(
+          (c: [number, number]) => [c[1], c[0]]
+        );
 
-      const steps = (route.legs?.[0]?.steps || []).map((s: { maneuver?: { instruction?: string; type?: string; modifier?: string }; distance?: number; duration?: number; name?: string }) => {
-        let instruction = s.maneuver?.instruction || '';
-        if (!instruction && s.maneuver) {
-          const type = s.maneuver.type || '';
-          const mod = s.maneuver.modifier ? ` (${s.maneuver.modifier})` : '';
-          instruction = `${type}${mod} ${s.name ? `on ${s.name}` : ''}`;
-        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const steps: RouteStep[] = (route.legs?.[0]?.steps || []).map((s: any) => {
+          let instruction = s.maneuver?.instruction || '';
+          if (!instruction && s.maneuver) {
+            const type = s.maneuver.type || '';
+            const mod = s.maneuver.modifier ? ` (${s.maneuver.modifier})` : '';
+            instruction = `${type}${mod} ${s.name ? `on ${s.name}` : ''}`;
+          }
+          const turnType = detectTurnType(s.maneuver?.type, s.maneuver?.modifier);
+          const loc = s.maneuver?.location;
+          const location: [number, number] | undefined =
+            Array.isArray(loc) && loc.length >= 2 ? [loc[1], loc[0]] : undefined;
+          return {
+            instruction: translateInstruction(instruction || '進む'),
+            distance: s.distance || 0,
+            duration: s.duration || 0,
+            name: s.name || '',
+            turnType,
+            location,
+          };
+        });
+
         return {
-          instruction: translateInstruction(instruction || '進む'),
-          distance: s.distance || 0,
-          duration: s.duration || 0,
-          name: s.name || '',
+          coordinates,
+          totalDistance: route.distance,
+          totalDuration: route.duration,
+          steps,
+          mode,
         };
       });
 
+      const scored = candidates.map((c) => ({
+        result: c,
+        ...scoreRoute(c, driverProfile),
+      }));
+
+      // standard: first (fastest) route. others: lowest stress score.
+      scored.sort((a, b) =>
+        driverProfile === 'standard' ? 0 : a.stressScore - b.stressScore
+      );
+      const best = driverProfile === 'standard' ? scored[0] : [...scored].sort((a, b) => a.stressScore - b.stressScore)[0];
+
+      const alternatives =
+        candidates.length > 1
+          ? scored.map((s) => ({
+              ...s.result,
+              profile: driverProfile,
+              stressScore: s.stressScore,
+              rightTurnCount: s.rightTurnCount,
+              leftTurnCount: s.leftTurnCount,
+              mode,
+            }))
+          : undefined;
+
       return {
-        coordinates,
-        totalDistance: route.distance,
-        totalDuration: route.duration,
-        steps,
+        ...best.result,
+        profile: driverProfile,
+        stressScore: best.stressScore,
+        rightTurnCount: best.rightTurnCount,
+        leftTurnCount: best.leftTurnCount,
+        alternatives,
         mode,
-        vehicleType: resultVehicleType,
-        cautions,
       };
     }
   } catch (err) {
@@ -242,24 +283,90 @@ export async function calculateRoute(
     walking: 1.25, // ~4.5 km/h
     cycling: 4.16, // ~15 km/h
   };
-  const speedFactor = mode === 'driving' ? VEHICLE_PROFILES[vehicleType].speedFactor : 1;
 
-  return {
+  const fallback: RouteResult = {
     coordinates: [start, end],
     totalDistance: dist,
-    totalDuration: dist / (speedMps[mode] * speedFactor),
+    totalDuration: dist / speedMps[mode],
     steps: [
       {
         instruction: '出発地点から目的地へ向かいます',
         distance: dist,
-        duration: dist / (speedMps[mode] * speedFactor),
+        duration: dist / speedMps[mode],
         name: '直線推計ルート',
+        turnType: 'straight',
       },
     ],
     mode,
-    vehicleType: resultVehicleType,
-    cautions,
+    profile: driverProfile,
+    stressScore: 0,
+    rightTurnCount: 0,
+    leftTurnCount: 0,
   };
+  return fallback;
+}
+
+/**
+ * Detects turn type from OSRM maneuver type/modifier.
+ */
+function detectTurnType(
+  type?: string,
+  modifier?: string
+): RouteStep['turnType'] {
+  const t = `${type ?? ''} ${modifier ?? ''}`.toLowerCase();
+  if (/merge|on ramp|off ramp/.test(t)) return 'merge';
+  if (/ramp|fork/.test(t)) return 'ramp';
+  if (/right|turn.*right/.test(t)) return 'right';
+  if (/left|turn.*left/.test(t)) return 'left';
+  if (/straight|continue|new name|depart|arrive|roundabout|rotary/.test(t)) return 'straight';
+  // turn without modifier (e.g. "turn") -> treat as other to avoid miscount
+  if (/turn/.test(t)) return 'other';
+  return 'other';
+}
+
+/**
+ * Scores a route for stress. Lower is easier.
+ * right turns penalized heavily, trunk-like roads give bonus.
+ */
+function scoreRoute(
+  route: RouteResult,
+  driverProfile: DriverProfile
+): { stressScore: number; rightTurnCount: number; leftTurnCount: number } {
+  const cfg = getDriverProfileConfig(driverProfile);
+  let rightTurnCount = 0;
+  let leftTurnCount = 0;
+  let score = 0;
+
+  for (const s of route.steps) {
+    if (s.turnType === 'right') {
+      rightTurnCount += 1;
+      score += cfg.rightTurnPenalty;
+      // short successive maneuver = extra penalty (multi-lane crossing proxy)
+      if (s.distance < 150) score += cfg.narrowRoadPenalty * 0.5;
+    } else if (s.turnType === 'left') {
+      leftTurnCount += 1;
+      score += cfg.rightTurnPenalty * 0.3;
+    } else if (s.turnType === 'merge' || s.turnType === 'ramp') {
+      score += cfg.narrowRoadPenalty * 0.4;
+    }
+    if (isTrunkLike(s.name)) score -= cfg.trunkRoadBonus;
+    // very short segment with turn = complex intersection proxy
+    if (s.distance < 60 && (s.turnType === 'right' || s.turnType === 'left')) {
+      score += 2;
+    }
+  }
+
+  // normalize: round to 1 decimal
+  return {
+    stressScore: Math.round(score * 10) / 10,
+    rightTurnCount,
+    leftTurnCount,
+  };
+}
+
+function isTrunkLike(name: string): boolean {
+  if (!name) return false;
+  return /国道|県道|バイパス|環状|通り|大通り|首都高|C1|C2|湾岸/i.test(name);
 }
 
 /**

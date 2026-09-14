@@ -15,6 +15,7 @@ interface MapContainerProps {
   routeEnd: GeoPoint | null;
   isMeasuring: boolean;
   measurePoints: [number, number][];
+  isDriving?: boolean;
   onMapClick: (lat: number, lng: number) => void;
   onSpotClick: (spot: SavedSpot) => void;
   onMapMove: (center: { lat: number; lng: number }, zoom: number) => void;
@@ -33,6 +34,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   routeEnd,
   isMeasuring,
   measurePoints,
+  isDriving,
   onMapClick,
   onSpotClick,
   onMapMove,
@@ -285,19 +287,26 @@ export const MapContainer: React.FC<MapContainerProps> = ({
 
     if (!routeResult || routeResult.coordinates.length < 2) return;
 
-    // Outer glow / casing line
+    // Highway vs surface styling to prevent elevated/under confusion
+    const usesHighway =
+      routeResult.mode === 'driving' &&
+      routeResult.steps.some((s) =>
+        /高速|首都高|自動車道|有料道路|C1|C2|湾岸|環状線/i.test(`${s.name} ${s.instruction}`)
+      );
+
+    // Outer glow / casing line (thicker shadow for highway)
     const casingPolyline = L.polyline(routeResult.coordinates, {
-      color: '#1e3a8a',
-      weight: 7,
+      color: usesHighway ? '#0c4a6e' : '#1e3a8a',
+      weight: usesHighway ? 9 : 7,
       opacity: 0.8,
       lineCap: 'round',
       lineJoin: 'round',
     });
     layer.addLayer(casingPolyline);
 
-    // Inner vibrant route line
+    // Inner vibrant route line (dashed for surface under elevated risk)
     const colorMap = {
-      driving: '#3b82f6',
+      driving: usesHighway ? '#0284c7' : '#3b82f6',
       walking: '#10b981',
       cycling: '#f59e0b',
     };
@@ -346,14 +355,49 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       layer.addLayer(endMarker);
     }
 
-    // Fit route bounds nicely with padding
-    const bounds = L.latLngBounds(routeResult.coordinates);
-    map.fitBounds(bounds, {
-      padding: [60, 60],
-      maxZoom: 17,
-      animate: true,
-    });
-  }, [routeResult, routeStart, routeEnd]);
+    // Merge / Shuto points (orange) — driving only
+    if (routeResult.mode === 'driving') {
+      routeResult.steps.forEach((step) => {
+        if ((step.turnType === 'merge' || step.turnType === 'ramp') && step.location) {
+          const isShuto = /首都高|C1|C2|湾岸|上野線|渋谷線|新宿線|池袋線|八重洲線|都心環状|中央環状/i.test(
+            `${step.name} ${step.instruction}`
+          );
+          const html = `
+            <div class="w-6 h-6 rounded-full ${isShuto ? 'bg-orange-600' : 'bg-amber-500'} text-white flex items-center justify-center shadow-lg border-2 border-white">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m8 6 4-4 4 4"></path>
+                <path d="M12 2v10.3"></path>
+                <path d="m20 22-4-4-4 4"></path>
+                <path d="M16 18v-9"></path>
+              </svg>
+            </div>
+          `;
+          const icon = L.divIcon({
+            className: 'merge-pin',
+            html,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          });
+          const marker = L.marker(step.location, { icon });
+          marker.bindTooltip(
+            `${isShuto ? '首都高・' : ''}合流${step.name ? `：${step.name}` : ''}`,
+            { direction: 'top', offset: [0, -12] }
+          );
+          layer.addLayer(marker);
+        }
+      });
+    }
+
+    // Fit route bounds nicely with padding (skip while driving to keep GPS follow stable)
+    if (!isDriving) {
+      const bounds = L.latLngBounds(routeResult.coordinates);
+      map.fitBounds(bounds, {
+        padding: [60, 60],
+        maxZoom: 17,
+        animate: true,
+      });
+    }
+  }, [routeResult, routeStart, routeEnd, isDriving]);
 
   // Measurement Line & Markers
   useEffect(() => {
