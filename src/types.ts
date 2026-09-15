@@ -67,6 +67,25 @@ export interface SearchResultItem {
   icon?: string;
 }
 
+export type NarrowLevel = 'unknown' | 'wide' | 'narrow' | 'very_narrow';
+
+export interface NarrowSegment {
+  stepIndex: number;
+  name: string;          // 名前なしの場合は '名称のない道路'
+  distance: number;      // meters
+  level: NarrowLevel;
+  estimatedWidth?: number; // width タグがあった場合のみ
+  oneway?: boolean;        // oneway=yes の場合はペナルティ減衰
+  reason: string;        // 'width タグ 3.2m' 等、UI に出す根拠文
+}
+
+export interface NarrowRoadAnalysis {
+  segments: NarrowSegment[];
+  totalNarrowDistance: number;  // meters
+  narrowRatio: number;          // 0.0 - 1.0（総距離に対する比率）
+  verified: boolean;            // Overpass 検証済みなら true
+}
+
 export interface RouteStep {
   instruction: string;
   distance: number; // meters
@@ -75,6 +94,8 @@ export interface RouteStep {
   turnType?: 'right' | 'left' | 'straight' | 'merge' | 'ramp' | 'other';
   roadClass?: string;
   location?: [number, number]; // [lat, lng] maneuver point
+  narrowLevel?: NarrowLevel;
+  estimatedWidth?: number;
 }
 
 export interface RouteResult {
@@ -88,6 +109,7 @@ export interface RouteResult {
   rightTurnCount?: number;
   leftTurnCount?: number;
   alternatives?: RouteResult[];
+  narrowRoadAnalysis?: NarrowRoadAnalysis;
 }
 
 export interface ClickedLocationInfo {
