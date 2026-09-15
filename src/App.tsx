@@ -67,6 +67,9 @@ export default function App() {
   const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
   const [isRoutingLoading, setIsRoutingLoading] = useState(false);
 
+  // 狭路カードから選択された区間（地図ハイライト用 stepIndex）
+  const [narrowHighlightStepIndex, setNarrowHighlightStepIndex] = useState<number | null>(null);
+
   // Driver profile state with localStorage initialization
   const [driverProfile, setDriverProfile] = useState<DriverProfile>(() => {
     try {
@@ -264,6 +267,7 @@ export default function App() {
         { avoidNarrowRoads, narrowRoadThreshold }
       );
       setRouteResult(result);
+      setNarrowHighlightStepIndex(null);
       if (profile !== 'standard' && result.rightTurnCount !== undefined) {
         showToast(
           `ゆとりルート検索: 右折${result.rightTurnCount}回・ストレス${result.stressScore}`,
@@ -412,6 +416,7 @@ export default function App() {
         onSpotClick={handleSpotClick}
         onMapMove={handleMapMove}
         focusPoint={focusPoint}
+        narrowHighlightStepIndex={narrowHighlightStepIndex}
       />
 
       {/* Top Floating Header & Search Bar */}
@@ -473,6 +478,8 @@ export default function App() {
               onClearRoute={handleClearRoute}
               onClose={() => setActivePanel('none')}
               onDriveModeChange={setIsDriving}
+              onNarrowSegmentClick={setNarrowHighlightStepIndex}
+              selectedNarrowStepIndex={narrowHighlightStepIndex}
             />
           )}
 

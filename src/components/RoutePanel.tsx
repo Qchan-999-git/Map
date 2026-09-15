@@ -7,6 +7,7 @@ import { LaneGuidanceCard } from './LaneGuidanceCard';
 import { ShutoMergeAssist } from './ShutoMergeAssist';
 import { ElevatedBadge } from './ElevatedBadge';
 import { TimeRestrictionCard } from './TimeRestrictionCard';
+import { NarrowRoadCard } from './NarrowRoadCard';
 import { checkTimeRestrictions } from '../services/timeRestriction';
 import { DriveModeCard } from './DriveModeCard';
 import { buildLaneAdvices, speakAdvice } from '../services/laneGuidance';
@@ -41,6 +42,8 @@ interface RoutePanelProps {
   onClearRoute: () => void;
   onClose: () => void;
   onDriveModeChange?: (driving: boolean) => void;
+  onNarrowSegmentClick: (stepIndex: number | null) => void;
+  selectedNarrowStepIndex: number | null;
 }
 
 export const RoutePanel: React.FC<RoutePanelProps> = ({
@@ -62,6 +65,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   onClearRoute,
   onClose,
   onDriveModeChange,
+  onNarrowSegmentClick,
+  selectedNarrowStepIndex,
 }) => {
   const [mode, setMode] = useState<TravelMode>('driving');
   const [voiceOn, setVoiceOn] = useState(true);
@@ -495,6 +500,12 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 
         {routeResult ? (
           <>
+            {/* Narrow road avoidance result (near TimeRestrictionCard) */}
+            <NarrowRoadCard
+              analysis={routeResult.narrowRoadAnalysis}
+              selectedStepIndex={selectedNarrowStepIndex}
+              onSelectSegment={onNarrowSegmentClick}
+            />
             {/* Early lane guidance (driving only, hands-free, shared GPS) */}
             {mode === 'driving' && laneAdvices.length > 0 && routeResult && (
               <LaneGuidanceCard
