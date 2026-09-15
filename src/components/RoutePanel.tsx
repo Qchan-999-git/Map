@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react';
-import { DriverProfile, GeoPoint, RouteResult, TravelMode } from '../types';
+import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { DriverProfile, GeoPoint, RouteResult, TravelMode, VehicleDifficulty, VehicleType } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
+import { VEHICLE_ICONS, VEHICLE_PROFILE_LIST, VEHICLE_PROFILES } from '../data/vehicleProfiles';
 import { NARROW_THRESHOLD_BY_VEHICLE, getNarrowThresholdForVehicle } from '../services/narrowRoad';
 import { LaneGuidanceCard } from './LaneGuidanceCard';
 import { ShutoMergeAssist } from './ShutoMergeAssist';
@@ -31,6 +32,8 @@ interface RoutePanelProps {
   isLoading: boolean;
   driverProfile: DriverProfile;
   onChangeDriverProfile: (profile: DriverProfile) => void;
+  vehicleType: VehicleType;
+  onVehicleTypeChange: (vehicle: VehicleType) => void;
   avoidNarrowRoads: boolean;
   narrowRoadThreshold: number;
   onChangeAvoidNarrowRoads: (value: boolean) => void;
@@ -38,13 +41,35 @@ interface RoutePanelProps {
   onSetStart: (point: GeoPoint | null) => void;
   onSetEnd: (point: GeoPoint | null) => void;
   onSwapPoints: () => void;
-  onCalculateRoute: (mode: TravelMode) => void;
+  onCalculateRoute: (mode: TravelMode, vehicle: VehicleType) => void;
   onClearRoute: () => void;
   onClose: () => void;
   onDriveModeChange?: (driving: boolean) => void;
   onNarrowSegmentClick: (stepIndex: number | null) => void;
   selectedNarrowStepIndex: number | null;
 }
+
+const DIFFICULTY_STYLES: Record<VehicleDifficulty, { label: string; className: string }> = {
+  easy: { label: '難易度：低', className: 'bg-emerald-100 text-emerald-700' },
+  standard: { label: '難易度：普通', className: 'bg-blue-100 text-blue-700' },
+  challenging: { label: '難易度：やや高', className: 'bg-amber-100 text-amber-700' },
+  hard: { label: '難易度：高', className: 'bg-rose-100 text-rose-700' },
+};
+
+const VehicleSummary: React.FC<{ vehicleType: VehicleType }> = ({ vehicleType }) => {
+  const profile = VEHICLE_PROFILES[vehicleType];
+  const Icon = VEHICLE_ICONS[vehicleType];
+  const diff = DIFFICULTY_STYLES[profile.difficulty];
+  return (
+    <div className="mt-2.5 pt-2.5 border-t border-blue-100/80 flex items-center gap-2">
+      <Icon size={14} className="text-blue-600" />
+      <span className="text-[11px] font-semibold text-neutral-700">{profile.name}</span>
+      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${diff.className}`}>
+        {diff.label}
+      </span>
+    </div>
+  );
+};
 
 export const RoutePanel: React.FC<RoutePanelProps> = ({
   routeStart,
@@ -54,6 +79,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   isLoading,
   driverProfile,
   onChangeDriverProfile,
+  vehicleType,
+  onVehicleTypeChange,
   avoidNarrowRoads,
   narrowRoadThreshold,
   onChangeAvoidNarrowRoads,
@@ -159,7 +186,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   const handleModeChange = (newMode: TravelMode) => {
     setMode(newMode);
     if (routeStart && routeEnd) {
-      onCalculateRoute(newMode);
+      onCalculateRoute(newMode, vehicleType);
     }
   };
 
@@ -391,6 +418,41 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
           </button>
         </div>
 
+        {/* Vehicle Type Selector (車種＝運転特性ベース) */}
+        {mode === 'driving' && (
+          <div>
+            <div className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+              <Car size={14} className="text-blue-600" />
+              <span>車種（運転特性）</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {VEHICLE_PROFILE_LIST.map((profile) => {
+                const Icon = VEHICLE_ICONS[profile.type];
+                const active = vehicleType === profile.type;
+                return (
+                  <button
+                    key={profile.type}
+                    id={`vehicle-${profile.type}-btn`}
+                    onClick={() => onVehicleTypeChange(profile.type)}
+                    title={profile.description}
+                    className={`flex flex-col items-center gap-1 py-1.5 px-0.5 rounded-lg border text-[10px] font-semibold leading-tight text-center transition-all ${
+                      active
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
+                        : 'border-neutral-200 bg-white text-neutral-500 hover:bg-neutral-50'
+                    }`}
+                  >
+                    <Icon size={15} />
+                    <span>{profile.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[10px] text-neutral-500 leading-snug">
+              {VEHICLE_PROFILES[vehicleType].description}
+            </p>
+          </div>
+        )}
+
         {/* Start & End Inputs */}
         <div className="relative flex items-center gap-2">
           <div className="flex-1 space-y-2">
@@ -465,7 +527,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
           <button
             id="compute-route-btn"
             disabled={!routeStart || !routeEnd || isLoading}
-            onClick={() => onCalculateRoute(mode)}
+            onClick={() => onCalculateRoute(mode, vehicleType)}
             className="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-neutral-200 disabled:text-neutral-400 text-white font-semibold text-xs shadow-md transition-all flex items-center justify-center gap-2"
           >
             {isLoading ? (
@@ -596,7 +658,28 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                   {routeResult.alternatives.length}案から低ストレス順に選択
                 </div>
               )}
+              {routeResult.mode === 'driving' && routeResult.vehicleType && (
+                <VehicleSummary vehicleType={routeResult.vehicleType} />
+              )}
             </div>
+
+            {/* Vehicle Cautions */}
+            {routeResult.cautions && routeResult.cautions.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
+                <div className="text-xs font-bold text-amber-800 flex items-center gap-1.5 mb-2">
+                  <AlertTriangle size={14} className="text-amber-500" />
+                  <span>運転注意ポイント</span>
+                </div>
+                <ul className="space-y-1.5">
+                  {routeResult.cautions.map((c, idx) => (
+                    <li key={idx} className="flex gap-1.5 text-[11px] text-neutral-700 leading-snug">
+                      <span className="text-amber-500 flex-shrink-0 mt-px">•</span>
+                      <span>{c}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Directions List */}
             <div>

@@ -1,5 +1,6 @@
-import { ClickedLocationInfo, DriverProfile, RouteResult, RouteStep, SearchResultItem, TravelMode } from '../types';
+import { ClickedLocationInfo, DriverProfile, RouteResult, RouteStep, SearchResultItem, TravelMode, VehicleType } from '../types';
 import { DriverProfileConfig, getDriverProfileConfig } from '../data/driverProfiles';
+import { VEHICLE_PROFILES } from '../data/vehicleProfiles';
 import { analyzeNarrowRoads, verifyNarrowRoads } from './narrowRoad';
 
 /**
@@ -195,6 +196,7 @@ export async function calculateRoute(
   end: [number, number],
   mode: TravelMode = 'driving',
   driverProfile: DriverProfile = 'standard',
+  vehicleType: VehicleType = 'standard',
   options?: RouteOptions
 ): Promise<RouteResult> {
   const profileMap: Record<TravelMode, string> = {
@@ -204,6 +206,10 @@ export async function calculateRoute(
   };
 
   const profile = profileMap[mode];
+  // 車種に応じた所要時間係数・注意ポイント（車で走行する場合のみ反映）
+  const speedFactor = mode === 'driving' ? VEHICLE_PROFILES[vehicleType].speedFactor : 1;
+  const cautions = mode === 'driving' ? [...VEHICLE_PROFILES[vehicleType].cautions] : [];
+  const resultVehicleType = mode === 'driving' ? vehicleType : undefined;
   const avoidNarrowRoads = options?.avoidNarrowRoads ?? false;
   const narrowRoadThreshold = options?.narrowRoadThreshold ?? 4.0;
   const wantAlternatives =
@@ -252,9 +258,11 @@ export async function calculateRoute(
         return {
           coordinates,
           totalDistance: route.distance,
-          totalDuration: route.duration,
+          totalDuration: route.duration / speedFactor,
           steps,
           mode,
+          vehicleType: resultVehicleType,
+          cautions,
         };
       });
 
@@ -336,17 +344,19 @@ export async function calculateRoute(
   const fallback: RouteResult = {
     coordinates: [start, end],
     totalDistance: dist,
-    totalDuration: dist / speedMps[mode],
+    totalDuration: dist / (speedMps[mode] * speedFactor),
     steps: [
       {
         instruction: '出発地点から目的地へ向かいます',
         distance: dist,
-        duration: dist / speedMps[mode],
+        duration: dist / (speedMps[mode] * speedFactor),
         name: '直線推計ルート',
         turnType: 'straight',
       },
     ],
     mode,
+    vehicleType: resultVehicleType,
+    cautions,
     profile: driverProfile,
     stressScore: 0,
     rightTurnCount: 0,
