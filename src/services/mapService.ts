@@ -1,5 +1,6 @@
 import { ClickedLocationInfo, DriverProfile, RouteResult, RouteStep, SearchResultItem, TravelMode } from '../types';
-import { getDriverProfileConfig } from '../data/driverProfiles';
+import { DriverProfileConfig, getDriverProfileConfig } from '../data/driverProfiles';
+import { analyzeNarrowRoads, verifyNarrowRoads } from './narrowRoad';
 
 /**
  * Calculates distance between two LatLng points using the Haversine formula (in meters).
@@ -172,15 +173,29 @@ export async function getLocationDetails(lat: number, lng: number): Promise<Clic
 }
 
 /**
+ * ルート計算のオプション。
+ * options 省略時は従来と完全に同一の挙動を保つ。
+ */
+export interface RouteOptions {
+  avoidNarrowRoads?: boolean;
+  narrowRoadThreshold?: number; // meters, default 4.0
+}
+
+// ルート再計算時に前回の Overpass 検証を中断するためのコントローラ
+let narrowVerifyController: AbortController | null = null;
+
+/**
  * Calculates real-world route using OSRM with turn-by-turn steps.
- * When driverProfile is beginner/elderly/yutori, fetches up to 3 alternatives
- * and selects the lowest-stress route (right-turn avoidance, trunk priority).
+ * When driverProfile is beginner/elderly/yutori (or narrow-road avoidance is ON),
+ * fetches up to 3 alternatives and selects the lowest-stress route
+ * (right-turn avoidance, trunk priority, narrow-road avoidance).
  */
 export async function calculateRoute(
   start: [number, number],
   end: [number, number],
   mode: TravelMode = 'driving',
-  driverProfile: DriverProfile = 'standard'
+  driverProfile: DriverProfile = 'standard',
+  options?: RouteOptions
 ): Promise<RouteResult> {
   const profileMap: Record<TravelMode, string> = {
     driving: 'driving',
@@ -189,7 +204,11 @@ export async function calculateRoute(
   };
 
   const profile = profileMap[mode];
-  const wantAlternatives = mode === 'driving' && driverProfile !== 'standard';
+  const avoidNarrowRoads = options?.avoidNarrowRoads ?? false;
+  const narrowRoadThreshold = options?.narrowRoadThreshold ?? 4.0;
+  const wantAlternatives =
+    mode === 'driving' &&
+    (driverProfile !== 'standard' || avoidNarrowRoads);
   // OSRM expects coordinates as: lng,lat ; lng,lat
   const url =
     `https://router.project-osrm.org/route/v1/${profile}/${start[1]},${start[0]};${end[1]},${end[0]}` +
@@ -239,16 +258,22 @@ export async function calculateRoute(
         };
       });
 
-      const scored = candidates.map((c) => ({
-        result: c,
-        ...scoreRoute(c, driverProfile),
-      }));
+      const scored = candidates.map((c) => {
+        if (avoidNarrowRoads) {
+          c.narrowRoadAnalysis = analyzeNarrowRoads(c.steps, narrowRoadThreshold);
+          applyNarrowLevels(c.steps, c.narrowRoadAnalysis);
+        }
+        return {
+          result: c,
+          ...scoreRoute(c, driverProfile),
+        };
+      });
 
-      // standard: first (fastest) route. others: lowest stress score.
-      scored.sort((a, b) =>
-        driverProfile === 'standard' ? 0 : a.stressScore - b.stressScore
-      );
-      const best = driverProfile === 'standard' ? scored[0] : [...scored].sort((a, b) => a.stressScore - b.stressScore)[0];
+      // standard: first (fastest) route. それ以外: 低ストレス順.
+      const preferLowStress = driverProfile !== 'standard' || avoidNarrowRoads;
+      const best = preferLowStress
+        ? [...scored].sort((a, b) => a.stressScore - b.stressScore)[0]
+        : scored[0];
 
       const alternatives =
         candidates.length > 1
@@ -262,7 +287,7 @@ export async function calculateRoute(
             }))
           : undefined;
 
-      return {
+      const result: RouteResult = {
         ...best.result,
         profile: driverProfile,
         stressScore: best.stressScore,
@@ -271,6 +296,29 @@ export async function calculateRoute(
         alternatives,
         mode,
       };
+
+      // Overpass 検証は 1 ルート計算につき 1 回まで（最良ルートのみ）
+      if (avoidNarrowRoads && result.coordinates.length >= 2) {
+        if (narrowVerifyController) narrowVerifyController.abort();
+        narrowVerifyController = new AbortController();
+        try {
+          const baseAnalysis =
+            result.narrowRoadAnalysis ??
+            analyzeNarrowRoads(result.steps, narrowRoadThreshold);
+          const verified = await verifyNarrowRoads(
+            baseAnalysis,
+            result.coordinates,
+            narrowRoadThreshold,
+            narrowVerifyController.signal
+          );
+          result.narrowRoadAnalysis = verified;
+          applyNarrowLevels(result.steps, verified);
+        } catch (err) {
+          console.warn('Narrow-road verification skipped:', err);
+        }
+      }
+
+      return result;
     }
   } catch (err) {
     console.warn('OSRM router error, generating fallback path:', err);
@@ -303,6 +351,9 @@ export async function calculateRoute(
     rightTurnCount: 0,
     leftTurnCount: 0,
   };
+  if (avoidNarrowRoads) {
+    fallback.narrowRoadAnalysis = analyzeNarrowRoads(fallback.steps, narrowRoadThreshold);
+  }
   return fallback;
 }
 
@@ -326,7 +377,8 @@ function detectTurnType(
 
 /**
  * Scores a route for stress. Lower is easier.
- * right turns penalized heavily, trunk-like roads give bonus.
+ * right turns penalized heavily, trunk-like roads give bonus,
+ * narrow-road segments add penalty based on each segment level.
  */
 function scoreRoute(
   route: RouteResult,
@@ -342,12 +394,12 @@ function scoreRoute(
       rightTurnCount += 1;
       score += cfg.rightTurnPenalty;
       // short successive maneuver = extra penalty (multi-lane crossing proxy)
-      if (s.distance < 150) score += cfg.narrowRoadPenalty * 0.5;
+      if (s.distance < 150) score += cfg.complexIntersectionPenalty * 0.5;
     } else if (s.turnType === 'left') {
       leftTurnCount += 1;
       score += cfg.rightTurnPenalty * 0.3;
     } else if (s.turnType === 'merge' || s.turnType === 'ramp') {
-      score += cfg.narrowRoadPenalty * 0.4;
+      score += cfg.complexIntersectionPenalty * 0.4;
     }
     if (isTrunkLike(s.name)) score -= cfg.trunkRoadBonus;
     // very short segment with turn = complex intersection proxy
@@ -356,12 +408,52 @@ function scoreRoute(
     }
   }
 
+  // 狭路区間のペナルティ（narrowRoadAnalysis があるときのみ加点）
+  score += computeNarrowRoadPenalty(route, cfg);
+
   // normalize: round to 1 decimal
   return {
     stressScore: Math.round(score * 10) / 10,
     rightTurnCount,
     leftTurnCount,
   };
+}
+
+/**
+ * 狭路区間に基づく加点。
+ * - narrow: penalty * (distance/100)
+ * - very_narrow: 上記の 2 倍
+ * - oneway=yes: 0.5 倍に減衰
+ */
+function computeNarrowRoadPenalty(route: RouteResult, cfg: DriverProfileConfig): number {
+  const analysis = route.narrowRoadAnalysis;
+  if (!analysis || cfg.narrowRoadPenalty <= 0) return 0;
+  let score = 0;
+  for (const seg of analysis.segments) {
+    if (seg.level !== 'narrow' && seg.level !== 'very_narrow') continue;
+    let factor = seg.level === 'very_narrow' ? 2 : 1;
+    if (seg.oneway) factor *= 0.5;
+    score += cfg.narrowRoadPenalty * (seg.distance / 100) * factor;
+  }
+  return score;
+}
+
+/**
+ * 狭路解析の結果を RouteStep に反映する（地図ハイライト・UI 表示用）。
+ */
+function applyNarrowLevels(steps: RouteStep[], analysis: RouteResult['narrowRoadAnalysis']): void {
+  if (!analysis) return;
+  const segmentsByIndex = new Map(analysis.segments.map((s) => [s.stepIndex, s]));
+  steps.forEach((step, idx) => {
+    const seg = segmentsByIndex.get(idx);
+    if (seg) {
+      step.narrowLevel = seg.level;
+      step.estimatedWidth = seg.estimatedWidth;
+    } else {
+      step.narrowLevel = undefined;
+      step.estimatedWidth = undefined;
+    }
+  });
 }
 
 export function isTrunkLike(name: string): boolean {
