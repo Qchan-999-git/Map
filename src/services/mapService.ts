@@ -364,7 +364,7 @@ function scoreRoute(
   };
 }
 
-function isTrunkLike(name: string): boolean {
+export function isTrunkLike(name: string): boolean {
   if (!name) return false;
   return /国道|県道|バイパス|環状|通り|大通り|首都高|C1|C2|湾岸/i.test(name);
 }
