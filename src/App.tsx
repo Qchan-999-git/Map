@@ -28,6 +28,8 @@ import { Map as MapIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const SAVED_SPOTS_STORAGE_KEY = 'map_app_saved_spots_v1';
 const DRIVER_PROFILE_STORAGE_KEY = 'map_app_driver_profile_v1';
+const AVOID_NARROW_STORAGE_KEY = 'navi_avoid_narrow_roads';
+const NARROW_THRESHOLD_STORAGE_KEY = 'navi_narrow_road_threshold';
 
 export default function App() {
   // Base map layer state
@@ -65,6 +67,9 @@ export default function App() {
   const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
   const [isRoutingLoading, setIsRoutingLoading] = useState(false);
 
+  // 狭路カードから選択された区間（地図ハイライト用 stepIndex）
+  const [narrowHighlightStepIndex, setNarrowHighlightStepIndex] = useState<number | null>(null);
+
   // Driver profile state with localStorage initialization
   const [driverProfile, setDriverProfile] = useState<DriverProfile>(() => {
     try {
@@ -81,6 +86,29 @@ export default function App() {
       // ignore
     }
     return DEFAULT_DRIVER_PROFILE;
+  });
+
+  // 狭い道回避設定（localStorage 永続化）
+  const [avoidNarrowRoads, setAvoidNarrowRoads] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem(AVOID_NARROW_STORAGE_KEY);
+      if (stored !== null) return stored === 'true';
+    } catch {
+      // ignore
+    }
+    return false;
+  });
+  const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
+    try {
+      const stored = localStorage.getItem(NARROW_THRESHOLD_STORAGE_KEY);
+      if (stored !== null) {
+        const n = parseFloat(stored);
+        if (!Number.isNaN(n) && n >= 3 && n <= 6) return n;
+      }
+    } catch {
+      // ignore
+    }
+    return 4.0;
   });
 
   // Measurement Tool State
@@ -130,6 +158,23 @@ export default function App() {
       // ignore
     }
   }, [driverProfile]);
+
+  // Persist narrow-road avoidance settings to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(AVOID_NARROW_STORAGE_KEY, String(avoidNarrowRoads));
+    } catch {
+      // ignore
+    }
+  }, [avoidNarrowRoads]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(NARROW_THRESHOLD_STORAGE_KEY, String(narrowRoadThreshold));
+    } catch {
+      // ignore
+    }
+  }, [narrowRoadThreshold]);
 
   // Recalculate measurement distance when points change
   useEffect(() => {
@@ -218,9 +263,11 @@ export default function App() {
         [routeStart.lat, routeStart.lng],
         [routeEnd.lat, routeEnd.lng],
         mode,
-        profile
+        profile,
+        { avoidNarrowRoads, narrowRoadThreshold }
       );
       setRouteResult(result);
+      setNarrowHighlightStepIndex(null);
       if (profile !== 'standard' && result.rightTurnCount !== undefined) {
         showToast(
           `ゆとりルート検索: 右折${result.rightTurnCount}回・ストレス${result.stressScore}`,
@@ -369,6 +416,7 @@ export default function App() {
         onSpotClick={handleSpotClick}
         onMapMove={handleMapMove}
         focusPoint={focusPoint}
+        narrowHighlightStepIndex={narrowHighlightStepIndex}
       />
 
       {/* Top Floating Header & Search Bar */}
@@ -413,6 +461,10 @@ export default function App() {
               isLoading={isRoutingLoading}
               driverProfile={driverProfile}
               onChangeDriverProfile={handleChangeDriverProfile}
+              avoidNarrowRoads={avoidNarrowRoads}
+              narrowRoadThreshold={narrowRoadThreshold}
+              onChangeAvoidNarrowRoads={setAvoidNarrowRoads}
+              onChangeNarrowRoadThreshold={setNarrowRoadThreshold}
               onSetStart={(pt) => {
                 setRouteStart(pt);
                 if (pt && routeEnd) handleCalculateRoute();
@@ -426,6 +478,8 @@ export default function App() {
               onClearRoute={handleClearRoute}
               onClose={() => setActivePanel('none')}
               onDriveModeChange={setIsDriving}
+              onNarrowSegmentClick={setNarrowHighlightStepIndex}
+              selectedNarrowStepIndex={narrowHighlightStepIndex}
             />
           )}
 
