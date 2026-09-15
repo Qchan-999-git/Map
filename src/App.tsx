@@ -28,6 +28,8 @@ import { Map as MapIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const SAVED_SPOTS_STORAGE_KEY = 'map_app_saved_spots_v1';
 const DRIVER_PROFILE_STORAGE_KEY = 'map_app_driver_profile_v1';
+const AVOID_NARROW_STORAGE_KEY = 'navi_avoid_narrow_roads';
+const NARROW_THRESHOLD_STORAGE_KEY = 'navi_narrow_road_threshold';
 
 export default function App() {
   // Base map layer state
@@ -83,6 +85,29 @@ export default function App() {
     return DEFAULT_DRIVER_PROFILE;
   });
 
+  // 狭い道回避設定（localStorage 永続化）
+  const [avoidNarrowRoads, setAvoidNarrowRoads] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem(AVOID_NARROW_STORAGE_KEY);
+      if (stored !== null) return stored === 'true';
+    } catch {
+      // ignore
+    }
+    return false;
+  });
+  const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
+    try {
+      const stored = localStorage.getItem(NARROW_THRESHOLD_STORAGE_KEY);
+      if (stored !== null) {
+        const n = parseFloat(stored);
+        if (!Number.isNaN(n) && n >= 3 && n <= 6) return n;
+      }
+    } catch {
+      // ignore
+    }
+    return 4.0;
+  });
+
   // Measurement Tool State
   const [isMeasuring, setIsMeasuring] = useState(false);
   const [measurePoints, setMeasurePoints] = useState<[number, number][]>([]);
@@ -130,6 +155,23 @@ export default function App() {
       // ignore
     }
   }, [driverProfile]);
+
+  // Persist narrow-road avoidance settings to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(AVOID_NARROW_STORAGE_KEY, String(avoidNarrowRoads));
+    } catch {
+      // ignore
+    }
+  }, [avoidNarrowRoads]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(NARROW_THRESHOLD_STORAGE_KEY, String(narrowRoadThreshold));
+    } catch {
+      // ignore
+    }
+  }, [narrowRoadThreshold]);
 
   // Recalculate measurement distance when points change
   useEffect(() => {
@@ -218,7 +260,8 @@ export default function App() {
         [routeStart.lat, routeStart.lng],
         [routeEnd.lat, routeEnd.lng],
         mode,
-        profile
+        profile,
+        { avoidNarrowRoads, narrowRoadThreshold }
       );
       setRouteResult(result);
       if (profile !== 'standard' && result.rightTurnCount !== undefined) {
@@ -413,6 +456,10 @@ export default function App() {
               isLoading={isRoutingLoading}
               driverProfile={driverProfile}
               onChangeDriverProfile={handleChangeDriverProfile}
+              avoidNarrowRoads={avoidNarrowRoads}
+              narrowRoadThreshold={narrowRoadThreshold}
+              onChangeAvoidNarrowRoads={setAvoidNarrowRoads}
+              onChangeNarrowRoadThreshold={setNarrowRoadThreshold}
               onSetStart={(pt) => {
                 setRouteStart(pt);
                 if (pt && routeEnd) handleCalculateRoute();
