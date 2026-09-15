@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { DriverProfile, GeoPoint, RouteResult, TravelMode } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
+import { NARROW_THRESHOLD_BY_VEHICLE, getNarrowThresholdForVehicle } from '../services/narrowRoad';
 import { LaneGuidanceCard } from './LaneGuidanceCard';
 import { ShutoMergeAssist } from './ShutoMergeAssist';
 import { ElevatedBadge } from './ElevatedBadge';
@@ -29,6 +30,10 @@ interface RoutePanelProps {
   isLoading: boolean;
   driverProfile: DriverProfile;
   onChangeDriverProfile: (profile: DriverProfile) => void;
+  avoidNarrowRoads: boolean;
+  narrowRoadThreshold: number;
+  onChangeAvoidNarrowRoads: (value: boolean) => void;
+  onChangeNarrowRoadThreshold: (value: number) => void;
   onSetStart: (point: GeoPoint | null) => void;
   onSetEnd: (point: GeoPoint | null) => void;
   onSwapPoints: () => void;
@@ -46,6 +51,10 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   isLoading,
   driverProfile,
   onChangeDriverProfile,
+  avoidNarrowRoads,
+  narrowRoadThreshold,
+  onChangeAvoidNarrowRoads,
+  onChangeNarrowRoadThreshold,
   onSetStart,
   onSetEnd,
   onSwapPoints,
@@ -251,6 +260,90 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
           <div className="text-[11px] text-neutral-400 mt-1">
             {DRIVER_PROFILES.find((p) => p.id === driverProfile)?.description}
           </div>
+        </div>
+
+        {/* Narrow Road Avoidance Toggle */}
+        <div className="rounded-xl border border-neutral-200 bg-white p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-neutral-700">狭い道を避ける</span>
+              <span className="text-[10px] text-neutral-400 hidden sm:inline">
+                すれ違いが難しい生活道路を回避
+              </span>
+            </div>
+            <button
+              id="toggle-avoid-narrow-roads"
+              role="switch"
+              aria-checked={avoidNarrowRoads}
+              onClick={() => onChangeAvoidNarrowRoads(!avoidNarrowRoads)}
+              className={`relative w-10 h-5.5 rounded-full transition-colors duration-200 flex-shrink-0 ${
+                avoidNarrowRoads ? 'bg-orange-500' : 'bg-neutral-300'
+              }`}
+              style={{ height: 22 }}
+            >
+              <span
+                className={`absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-all duration-200 ${
+                  avoidNarrowRoads ? 'left-[19px]' : 'left-0.5'
+                }`}
+                style={{ width: 18, height: 18, top: 2 }}
+              />
+            </button>
+          </div>
+
+          {avoidNarrowRoads && (
+            <div className="mt-2.5 space-y-2">
+              {/* Threshold slider */}
+              <div className="flex items-center gap-2">
+                <input
+                  id="narrow-threshold-slider"
+                  type="range"
+                  min={3}
+                  max={6}
+                  step={0.5}
+                  value={narrowRoadThreshold}
+                  onChange={(e) => onChangeNarrowRoadThreshold(parseFloat(e.target.value))}
+                  className="flex-1 accent-orange-500"
+                  aria-label="狭い道の幅員閾値"
+                />
+                <span className="text-xs font-bold text-orange-600 tabular-nums w-14 text-right">
+                  {narrowRoadThreshold.toFixed(1)} m
+                </span>
+              </div>
+
+              {/* Vehicle-based presets (F-1-2) */}
+              <div className="flex flex-wrap gap-1">
+                {(Object.keys(NARROW_THRESHOLD_BY_VEHICLE) as (keyof typeof NARROW_THRESHOLD_BY_VEHICLE)[])
+                  .filter((v) => v !== 'motorcycle')
+                  .map((v) => {
+                    const t = getNarrowThresholdForVehicle(v);
+                    if (t === null) return null;
+                    const labelMap: Record<string, string> = {
+                      kei: '軽',
+                      standard: '普通車',
+                      large: 'SUV',
+                      truck: 'トラック',
+                    };
+                    return (
+                      <button
+                        key={v}
+                        onClick={() => onChangeNarrowRoadThreshold(t)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors ${
+                          Math.abs(narrowRoadThreshold - t) < 0.001
+                            ? 'bg-orange-500 text-white border-orange-500'
+                            : 'bg-neutral-50 text-neutral-500 border-neutral-200 hover:border-orange-300'
+                        }`}
+                      >
+                        {labelMap[v]} {t.toFixed(1)}m
+                      </button>
+                    );
+                  })}
+              </div>
+
+              <p className="text-[10px] text-neutral-400 leading-snug">
+                閾値より狭い幅員の区間を避けてルートを選びます（OSM データが検証に使われます）。
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Travel Mode Toggle */}
