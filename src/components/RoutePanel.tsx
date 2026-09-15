@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { DriverProfile, GeoPoint, RouteResult, TravelMode, VehicleDifficulty, VehicleType } from '../types';
+import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, ParkingCircle, Wallet, Layers, CircleAlert } from 'lucide-react';
+import { DriverProfile, GeoPoint, ParkingSpot, RouteResult, TravelMode, VehicleDifficulty, VehicleType } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
 import { VEHICLE_ICONS, VEHICLE_PROFILE_LIST, VEHICLE_PROFILES } from '../data/vehicleProfiles';
 import { NARROW_THRESHOLD_BY_VEHICLE, getNarrowThresholdForVehicle } from '../services/narrowRoad';
@@ -47,6 +47,12 @@ interface RoutePanelProps {
   onDriveModeChange?: (driving: boolean) => void;
   onNarrowSegmentClick: (stepIndex: number | null) => void;
   selectedNarrowStepIndex: number | null;
+  parkingSpots: ParkingSpot[];
+  parkingLoading: boolean;
+  parkingError: string | null;
+  selectedParkingId: string | null;
+  onSearchParking: () => void;
+  onSelectParking: (spot: ParkingSpot | null) => void;
 }
 
 const DIFFICULTY_STYLES: Record<VehicleDifficulty, { label: string; className: string }> = {
@@ -55,6 +61,35 @@ const DIFFICULTY_STYLES: Record<VehicleDifficulty, { label: string; className: s
   challenging: { label: '難易度：やや高', className: 'bg-amber-100 text-amber-700' },
   hard: { label: '難易度：高', className: 'bg-rose-100 text-rose-700' },
 };
+
+const PARKING_TYPE_LABELS: Record<string, string> = {
+  surface: '平面',
+  garage: '屋内',
+  multi_storey: '立体',
+  underground: '地下',
+  rooftop: '屋上',
+  layby: '路上',
+  lane: 'レーン',
+  street_side: '路側',
+  shed: 'シェッド',
+  carports: 'カーポート',
+};
+
+function parkingTypeLabel(parkingType?: string): string {
+  if (!parkingType) return '種別不明';
+  const normalized = parkingType.trim().toLowerCase();
+  return PARKING_TYPE_LABELS[normalized] || parkingType;
+}
+
+function parkingFeeLabel(fee?: string): { label: string; paid: boolean } | null {
+  if (!fee) return null;
+  const f = fee.trim().toLowerCase();
+  if (f === 'yes') return { label: '有料', paid: true };
+  if (f === 'no' || f === 'free' || f === 'public' || f === 'customers') {
+    return { label: '無料', paid: false };
+  }
+  return { label: fee, paid: true };
+}
 
 const VehicleSummary: React.FC<{ vehicleType: VehicleType }> = ({ vehicleType }) => {
   const profile = VEHICLE_PROFILES[vehicleType];
@@ -94,6 +129,12 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   onDriveModeChange,
   onNarrowSegmentClick,
   selectedNarrowStepIndex,
+  parkingSpots,
+  parkingLoading,
+  parkingError,
+  selectedParkingId,
+  onSearchParking,
+  onSelectParking,
 }) => {
   const [mode, setMode] = useState<TravelMode>('driving');
   const [voiceOn, setVoiceOn] = useState(true);
@@ -557,6 +598,110 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 
       {/* Results / Step-by-Step Directions */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Parking guidance around destination */}
+        {routeEnd && (
+          <div className="rounded-2xl border border-purple-200 bg-purple-50/60 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <ParkingCircle size={15} className="text-purple-600" />
+                <span className="text-xs font-bold text-purple-800">目的地周辺の駐車場</span>
+              </div>
+              {parkingSpots.length > 0 && !parkingLoading && (
+                <button
+                  onClick={() => onSelectParking(null)}
+                  className="text-[10px] font-semibold text-purple-600 hover:text-purple-800 underline"
+                >
+                  表示をクリア
+                </button>
+              )}
+            </div>
+
+            {parkingError && (
+              <div className="mt-2.5 flex items-start gap-1.5 text-[11px] text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-2.5 py-2">
+                <CircleAlert size={13} className="flex-shrink-0 mt-px" />
+                <span>{parkingError}</span>
+              </div>
+            )}
+
+            {parkingLoading ? (
+              <div className="mt-2.5 flex items-center justify-center gap-2 py-3 text-purple-600 text-xs font-medium">
+                <Loader2 size={16} className="animate-spin" />
+                <span>周辺の駐車場を検索中...</span>
+              </div>
+            ) : parkingSpots.length > 0 ? (
+              <div className="mt-2.5 space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                {parkingSpots.map((spot) => {
+                  const fee = parkingFeeLabel(spot.fee);
+                  const isSelected = selectedParkingId === spot.id;
+                  return (
+                    <button
+                      key={spot.id}
+                      onClick={() => onSelectParking(isSelected ? null : spot)}
+                      className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-start gap-2.5 ${
+                        isSelected
+                          ? 'border-purple-400 bg-purple-100/90 shadow-sm'
+                          : 'border-neutral-200 bg-white hover:border-purple-300'
+                      }`}
+                    >
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        isSelected ? 'bg-purple-600' : 'bg-purple-500'
+                      } text-white`}>
+                        <ParkingCircle size={14} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-xs font-semibold truncate ${isSelected ? 'text-purple-900' : 'text-neutral-800'}`}>
+                            {spot.name}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-[10px] text-neutral-500">
+                          <span className="font-bold text-purple-600">{Math.round(spot.distance)} m</span>
+                          {spot.capacity !== undefined && (
+                            <span>{spot.capacity} 台</span>
+                          )}
+                          {spot.parkingType && (
+                            <span className="inline-flex items-center gap-0.5">
+                              <Layers size={10} className="text-neutral-400" />
+                              {parkingTypeLabel(spot.parkingType)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        {fee && (
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            fee.paid
+                              ? isSelected ? 'bg-purple-800 text-white' : 'bg-purple-600 text-white'
+                              : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {fee.label}
+                          </span>
+                        )}
+                        {spot.fee && !fee && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-neutral-200 text-neutral-600">
+                            {spot.fee}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {!parkingLoading && parkingSpots.length === 0 && (
+              <button
+                id="search-parking-btn"
+                onClick={onSearchParking}
+                className="mt-2.5 w-full py-2 px-3 rounded-xl border border-purple-300 bg-white text-purple-700 hover:bg-purple-50 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <ParkingCircle size={15} />
+                <span>目的地周辺の駐車場を探す</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Time-based closure check (always visible: school zone / Ginza hokoten / timed no-right-turn) */}
         <TimeRestrictionCard statuses={timeStatuses} nowLabel={nowLabel} />
 

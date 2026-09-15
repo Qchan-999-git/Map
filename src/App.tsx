@@ -13,6 +13,7 @@ import {
   DriverProfile,
   GeoPoint,
   MapLayerConfig,
+  ParkingSpot,
   RouteResult,
   SavedSpot,
   SearchResultItem,
@@ -25,6 +26,7 @@ import {
   calculateHaversineDistance,
   calculateRoute,
   getLocationDetails,
+  searchNearbyParking,
 } from './services/mapService';
 import { Map as MapIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 
@@ -74,6 +76,12 @@ export default function App() {
 
   // 狭路カードから選択された区間（地図ハイライト用 stepIndex）
   const [narrowHighlightStepIndex, setNarrowHighlightStepIndex] = useState<number | null>(null);
+
+  // 駐車場案内の状態
+  const [parkingSpots, setParkingSpots] = useState<ParkingSpot[]>([]);
+  const [parkingLoading, setParkingLoading] = useState(false);
+  const [parkingError, setParkingError] = useState<string | null>(null);
+  const [selectedParkingId, setSelectedParkingId] = useState<string | null>(null);
 
   // Driver profile state with localStorage initialization
   const [driverProfile, setDriverProfile] = useState<DriverProfile>(() => {
@@ -180,6 +188,14 @@ export default function App() {
       // ignore
     }
   }, [narrowRoadThreshold]);
+
+  // 目的地が変わったら駐車場の検索結果をクリア
+  useEffect(() => {
+    setParkingSpots([]);
+    setParkingLoading(false);
+    setParkingError(null);
+    setSelectedParkingId(null);
+  }, [routeEnd]);
 
   // Recalculate measurement distance when points change
   useEffect(() => {
@@ -324,6 +340,37 @@ export default function App() {
     setRouteResult(null);
   };
 
+  // 目的地周辺の駐車場を検索（明示的なボタン押下時のみ実行）
+  const handleSearchParking = useCallback(async () => {
+    if (!routeEnd) return;
+    setParkingLoading(true);
+    setParkingError(null);
+    setSelectedParkingId(null);
+    setParkingSpots([]);
+    try {
+      const spots = await searchNearbyParking(routeEnd.lat, routeEnd.lng);
+      setParkingSpots(spots);
+      if (spots.length === 0) {
+        setParkingError('周辺に駐車場が見つかりませんでした');
+      } else {
+        showToast(`${spots.length} 件の駐車場を表示しました`, 'success');
+      }
+    } catch (err) {
+      console.error('Parking search error:', err);
+      setParkingError('駐車場の検索に失敗しました。時間をおいて再試行してください');
+    } finally {
+      setParkingLoading(false);
+    }
+  }, [routeEnd]);
+
+  // 駐車場選択: 地図上でハイライト + その地点へパン
+  const handleSelectParking = useCallback((spot: ParkingSpot | null) => {
+    setSelectedParkingId(spot?.id ?? null);
+    if (spot) {
+      setFocusPoint({ lat: spot.lat, lng: spot.lng, name: spot.name });
+    }
+  }, []);
+
   // Spot management
   const handleSaveSpot = (newSpotData: Omit<SavedSpot, 'id' | 'createdAt'>) => {
     const spot: SavedSpot = {
@@ -423,6 +470,9 @@ export default function App() {
         clickedLocation={clickedLocation}
         searchMarker={searchMarker}
         currentLocation={currentLocation}
+        parkingSpots={parkingSpots}
+        selectedParkingId={selectedParkingId}
+        onParkingClick={handleSelectParking}
         routeResult={routeResult}
         routeStart={routeStart}
         routeEnd={routeEnd}
@@ -499,6 +549,12 @@ export default function App() {
               onDriveModeChange={setIsDriving}
               onNarrowSegmentClick={setNarrowHighlightStepIndex}
               selectedNarrowStepIndex={narrowHighlightStepIndex}
+              parkingSpots={parkingSpots}
+              parkingLoading={parkingLoading}
+              parkingError={parkingError}
+              selectedParkingId={selectedParkingId}
+              onSearchParking={handleSearchParking}
+              onSelectParking={handleSelectParking}
             />
           )}
 

@@ -1,4 +1,4 @@
-import { ClickedLocationInfo, DriverProfile, RouteResult, RouteStep, SearchResultItem, TravelMode, VehicleType } from '../types';
+import { ClickedLocationInfo, DriverProfile, ParkingSpot, RouteResult, RouteStep, SearchResultItem, TravelMode, VehicleType } from '../types';
 import { DriverProfileConfig, getDriverProfileConfig } from '../data/driverProfiles';
 import { VEHICLE_PROFILES } from '../data/vehicleProfiles';
 import { analyzeNarrowRoads, verifyNarrowRoads } from './narrowRoad';
@@ -42,6 +42,88 @@ export function formatDuration(seconds: number): string {
   const hours = Math.floor(mins / 60);
   const remainingMins = mins % 60;
   return `約 ${hours} 時間 ${remainingMins} 分`;
+}
+
+/**
+ * Overpass API のベースURL
+ */
+const OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter';
+
+/**
+ * 駐車場の検索半径（メートル）。調整しやすいよう定数として定義する。
+ */
+export const PARKING_SEARCH_RADIUS_METERS = 500;
+
+/**
+ * 指定した緯度経度を中心に周辺の駐車場（amenity=parking）を Overpass API で検索する。
+ * ノード・ウェイ双方を対象とし、近い順にソートして返す。
+ * 取得失敗時は空配列を返す（呼び出し側でエラーメッセージ表示）。
+ */
+export async function searchNearbyParking(
+  lat: number,
+  lng: number,
+  radiusMeters?: number
+): Promise<ParkingSpot[]> {
+  const radius = radiusMeters ?? PARKING_SEARCH_RADIUS_METERS;
+  // Overpass の around フィルタは 緯度,経度 の順で指定する
+  const query = `
+[out:json][timeout:15];
+(
+  node["amenity"="parking"](around:${radius},${lat},${lng});
+  way["amenity"="parking"](around:${radius},${lat},${lng});
+);
+out center tags;
+`;
+
+  try {
+    const res = await fetch(OVERPASS_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!res.ok) throw new Error('Overpass parking search failed');
+
+    const data = (await res.json()) as {
+      elements?: Array<{
+        id: number;
+        type: 'node' | 'way';
+        lat?: number;
+        lon?: number;
+        center?: { lat: number; lon: number };
+        tags?: Record<string, string>;
+      }>;
+    };
+
+    const elements = data.elements ?? [];
+    const spots: ParkingSpot[] = [];
+
+    elements.forEach((el) => {
+      const spotLat = el.type === 'node' ? el.lat : el.center?.lat;
+      const spotLng = el.type === 'node' ? el.lon : el.center?.lon;
+      if (typeof spotLat !== 'number' || typeof spotLng !== 'number') return;
+
+      const tags = el.tags ?? {};
+      const capacityRaw = parseInt(tags.capacity ?? '', 10);
+      const capacity = !Number.isNaN(capacityRaw) && capacityRaw > 0 ? capacityRaw : undefined;
+
+      spots.push({
+        id: `${el.type}-${el.id}`,
+        lat: spotLat,
+        lng: spotLng,
+        name: tags.name?.trim() || '駐車場',
+        capacity,
+        fee: tags.fee,
+        parkingType: tags.parking,
+        distance: calculateHaversineDistance(lat, lng, spotLat, spotLng),
+      });
+    });
+
+    spots.sort((a, b) => a.distance - b.distance);
+    return spots;
+  } catch (err) {
+    console.warn('Parking search failed:', err);
+    return [];
+  }
 }
 
 /**

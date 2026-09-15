@@ -86,6 +86,7 @@ export const QUICK_CATEGORIES = [
   { label: '駅', query: '駅' },
   { label: 'カフェ', query: 'カフェ' },
   { label: 'コンビニ', query: 'コンビニ' },
+  { label: '駐車場', query: '駐車場' },
   { label: '観光地', query: '観光' },
   { label: 'レストラン', query: 'レストラン' },
   { label: '温泉', query: '温泉' },
