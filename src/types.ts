@@ -4,12 +4,14 @@ export type DriverProfile = 'standard' | 'beginner' | 'elderly' | 'yutori';
 
 export type VehicleType = 'kei' | 'standard' | 'large' | 'truck' | 'motorcycle';
 
+export type VehicleDifficulty = 'easy' | 'standard' | 'challenging' | 'hard';
+
 export interface VehicleProfile {
   type: VehicleType;
   name: string;
   group: string;
   description: string;
-  difficulty: 'easy' | 'standard' | 'challenging' | 'hard';
+  difficulty: VehicleDifficulty;
   cautions: string[];
   speedFactor: number;
 }
@@ -104,6 +106,8 @@ export interface RouteResult {
   totalDuration: number; // seconds
   steps: RouteStep[];
   mode: TravelMode;
+  vehicleType?: VehicleType;
+  cautions?: string[]; // 車種・走行モード別の運転注意ポイント
   profile?: DriverProfile;
   stressScore?: number;
   rightTurnCount?: number;

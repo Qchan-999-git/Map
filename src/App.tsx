@@ -17,8 +17,10 @@ import {
   SavedSpot,
   SearchResultItem,
   TravelMode,
+  VehicleType,
 } from './types';
 import { DEFAULT_DRIVER_PROFILE } from './data/driverProfiles';
+import { VEHICLE_PROFILES } from './data/vehicleProfiles';
 import {
   calculateHaversineDistance,
   calculateRoute,
@@ -66,6 +68,9 @@ export default function App() {
   const [routeEnd, setRouteEnd] = useState<GeoPoint | null>(null);
   const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
   const [isRoutingLoading, setIsRoutingLoading] = useState(false);
+
+  // Vehicle type state (運転特性ベースの分類)
+  const [vehicleType, setVehicleType] = useState<VehicleType>('standard');
 
   // 狭路カードから選択された区間（地図ハイライト用 stepIndex）
   const [narrowHighlightStepIndex, setNarrowHighlightStepIndex] = useState<number | null>(null);
@@ -249,14 +254,16 @@ export default function App() {
     setSearchMarker(null);
   };
 
-  // Route calculation (driverProfile-aware)
+  // Route calculation (driverProfile-aware + vehicleType-aware)
   const handleCalculateRoute = async (
     mode: TravelMode = 'driving',
-    profileOverride?: DriverProfile
+    profileOverride?: DriverProfile,
+    vehicleOverride?: VehicleType
   ) => {
     if (!routeStart || !routeEnd) return;
     setIsRoutingLoading(true);
     const profile = profileOverride ?? driverProfile;
+    const vehicle = vehicleOverride ?? vehicleType;
 
     try {
       const result = await calculateRoute(
@@ -264,6 +271,7 @@ export default function App() {
         [routeEnd.lat, routeEnd.lng],
         mode,
         profile,
+        vehicle,
         { avoidNarrowRoads, narrowRoadThreshold }
       );
       setRouteResult(result);
@@ -290,6 +298,15 @@ export default function App() {
     if (routeStart && routeEnd) {
       await handleCalculateRoute(routeResult?.mode ?? 'driving', p);
     }
+  };
+
+  // Vehicle type change（既にルートがあれば再計算・トースト通知）
+  const handleVehicleTypeChange = (vehicle: VehicleType) => {
+    setVehicleType(vehicle);
+    if (routeStart && routeEnd) {
+      handleCalculateRoute(routeResult?.mode ?? 'driving', driverProfile, vehicle);
+    }
+    showToast(`車種を「${VEHICLE_PROFILES[vehicle].name}」に切り替えました`, 'info');
   };
 
   const handleSwapRoutePoints = () => {
@@ -461,6 +478,8 @@ export default function App() {
               isLoading={isRoutingLoading}
               driverProfile={driverProfile}
               onChangeDriverProfile={handleChangeDriverProfile}
+              vehicleType={vehicleType}
+              onVehicleTypeChange={handleVehicleTypeChange}
               avoidNarrowRoads={avoidNarrowRoads}
               narrowRoadThreshold={narrowRoadThreshold}
               onChangeAvoidNarrowRoads={setAvoidNarrowRoads}
@@ -474,7 +493,7 @@ export default function App() {
                 if (routeStart && pt) handleCalculateRoute();
               }}
               onSwapPoints={handleSwapRoutePoints}
-              onCalculateRoute={handleCalculateRoute}
+              onCalculateRoute={(mode, vehicle) => handleCalculateRoute(mode, undefined, vehicle)}
               onClearRoute={handleClearRoute}
               onClose={() => setActivePanel('none')}
               onDriveModeChange={setIsDriving}
