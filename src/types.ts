@@ -123,3 +123,14 @@ export interface ClickedLocationInfo {
   elevation?: number | null;
   loading?: boolean;
 }
+
+export interface ParkingSpot {
+  id: string;
+  lat: number;
+  lng: number;
+  name: string;
+  capacity?: number;
+  fee?: string;
+  parkingType?: string;
+  distance: number;
+}

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
-import { ClickedLocationInfo, GeoPoint, MapLayerConfig, RouteResult, RouteStep, SavedSpot } from '../types';
+import { ClickedLocationInfo, GeoPoint, MapLayerConfig, ParkingSpot, RouteResult, RouteStep, SavedSpot } from '../types';
 import { CATEGORY_INFO } from '../data/mapLayers';
 
 interface MapContainerProps {
@@ -10,6 +10,9 @@ interface MapContainerProps {
   clickedLocation: ClickedLocationInfo | null;
   searchMarker: GeoPoint | null;
   currentLocation: { lat: number; lng: number; accuracy?: number } | null;
+  parkingSpots: ParkingSpot[];
+  selectedParkingId: string | null;
+  onParkingClick: (spot: ParkingSpot) => void;
   routeResult: RouteResult | null;
   routeStart: GeoPoint | null;
   routeEnd: GeoPoint | null;
@@ -83,6 +86,9 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   clickedLocation,
   searchMarker,
   currentLocation,
+  parkingSpots,
+  selectedParkingId,
+  onParkingClick,
   routeResult,
   routeStart,
   routeEnd,
@@ -102,6 +108,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   // Layer groups for markers
   const savedSpotsLayerRef = useRef<L.LayerGroup | null>(null);
   const tempMarkerLayerRef = useRef<L.LayerGroup | null>(null);
+  const parkingLayerRef = useRef<L.LayerGroup | null>(null);
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const measureLayerRef = useRef<L.LayerGroup | null>(null);
   const locationLayerRef = useRef<L.LayerGroup | null>(null);
@@ -127,6 +134,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     // Initialize layer groups
     savedSpotsLayerRef.current = L.layerGroup().addTo(map);
     tempMarkerLayerRef.current = L.layerGroup().addTo(map);
+    parkingLayerRef.current = L.layerGroup().addTo(map);
     routeLayerRef.current = L.layerGroup().addTo(map);
     measureLayerRef.current = L.layerGroup().addTo(map);
     locationLayerRef.current = L.layerGroup().addTo(map);
@@ -291,6 +299,85 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       layer.addLayer(marker);
     }
   }, [clickedLocation, searchMarker]);
+
+  // Render Parking Spots (purple markers)
+  useEffect(() => {
+    const layer = parkingLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+
+    parkingSpots.forEach((spot) => {
+      const isSelected = selectedParkingId === spot.id;
+      const capacityText =
+        spot.capacity !== undefined ? `収容 ${spot.capacity} 台` : '台数不明';
+      const feeText =
+        spot.fee === 'yes'
+          ? '有料'
+          : spot.fee === 'no'
+            ? '無料'
+            : spot.fee === 'free' || spot.fee === 'public' || spot.fee === 'customers'
+              ? '無料'
+              : '情報なし';
+
+      const html = `
+        <div class="relative flex items-center justify-center transform transition-transform duration-200 ${
+          isSelected ? 'scale-125 z-[999]' : 'hover:scale-110'
+        }">
+          <div class="w-8 h-8 rounded-full shadow-lg border-2 flex items-center justify-center ${
+            isSelected ? 'bg-purple-700 border-white' : 'bg-purple-500 border-white/80'
+          }" style="box-shadow: 0 4px 12px rgba(124,58,237,0.45);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white">
+              <path d="M7 17h10"></path>
+              <path d="M6 7h9a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"></path>
+            </svg>
+          </div>
+        </div>
+      `;
+
+      const icon = L.divIcon({
+        className: 'parking-pin',
+        html,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+      });
+
+      const marker = L.marker([spot.lat, spot.lng], {
+        icon,
+        zIndexOffset: isSelected ? 1000 : 0,
+      });
+      marker.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        onParkingClick(spot);
+      });
+
+      const popupHtml = `
+        <div class="min-w-[160px]">
+          <div class="font-bold text-sm text-neutral-900 mb-1">${spot.name}</div>
+          <div class="text-xs text-neutral-600 space-y-0.5">
+            <div>${capacityText}</div>
+            <div>${feeText}</div>
+            ${spot.parkingType ? `<div>${spot.parkingType}</div>` : ''}
+            <div class="text-purple-600 font-semibold">${Math.round(spot.distance)} m</div>
+          </div>
+        </div>
+      `;
+      marker.bindPopup(popupHtml, {
+        offset: [0, -16],
+        className: 'parking-popup',
+      });
+
+      marker.bindTooltip(spot.name, {
+        direction: 'top',
+        offset: [0, -14],
+        className: 'custom-tooltip text-xs font-semibold px-2 py-1 rounded shadow-md',
+      });
+
+      layer.addLayer(marker);
+      if (selectedParkingId === spot.id) {
+        marker.openTooltip();
+      }
+    });
+  }, [parkingSpots, selectedParkingId, onParkingClick]);
 
   // Current GPS Location Marker
   useEffect(() => {
