@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
-import { ClickedLocationInfo, GeoPoint, MapLayerConfig, RouteResult, SavedSpot } from '../types';
+import { ClickedLocationInfo, GeoPoint, MapLayerConfig, RouteResult, RouteStep, SavedSpot } from '../types';
 import { CATEGORY_INFO } from '../data/mapLayers';
 
 interface MapContainerProps {
@@ -20,6 +20,60 @@ interface MapContainerProps {
   onSpotClick: (spot: SavedSpot) => void;
   onMapMove: (center: { lat: number; lng: number }, zoom: number) => void;
   focusPoint: GeoPoint | null;
+  narrowHighlightStepIndex?: number | null;
+}
+
+interface NarrowSection {
+  stepIndex: number;
+  name: string;
+  points: [number, number][];
+  estimatedWidth?: number;
+}
+
+/**
+ * 狭路判定済みステップ（narrowLevel）をルートポリライン座標の区間へ分解する。
+ * ステップの maneuver 地点（location）を区切りの目安に使う。
+ */
+function buildNarrowSections(
+  coordinates: [number, number][],
+  steps: RouteStep[]
+): NarrowSection[] {
+  const sections: NarrowSection[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const st = steps[i];
+    if (st.narrowLevel !== 'narrow' && st.narrowLevel !== 'very_narrow') continue;
+    const endLoc = st.location;
+    if (!endLoc) continue;
+    const startLoc = i === 0 ? coordinates[0] : steps[i - 1]?.location ?? coordinates[0];
+    const startIdx = nearestCoordIndex(coordinates, startLoc);
+    const endIdx = nearestCoordIndex(coordinates, endLoc);
+    const points = coordinates.slice(Math.min(startIdx, endIdx), Math.max(startIdx, endIdx) + 1);
+    if (points.length >= 2) {
+      sections.push({
+        stepIndex: i,
+        name: st.name || '名称のない道路',
+        points,
+        estimatedWidth: st.estimatedWidth,
+      });
+    }
+  }
+  return sections;
+}
+
+function nearestCoordIndex(
+  coordinates: [number, number][],
+  point: [number, number]
+): number {
+  let best = 0;
+  let bestDist = Infinity;
+  coordinates.forEach((c, idx) => {
+    const d = (c[0] - point[0]) ** 2 + (c[1] - point[1]) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      best = idx;
+    }
+  });
+  return best;
 }
 
 export const MapContainer: React.FC<MapContainerProps> = ({
@@ -39,6 +93,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   onSpotClick,
   onMapMove,
   focusPoint,
+  narrowHighlightStepIndex,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -388,6 +443,25 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       });
     }
 
+    // Narrow road segments overlay (orange dashed, drawn on top of main route)
+    const narrowSections = buildNarrowSections(routeResult.coordinates, routeResult.steps);
+    narrowSections.forEach((sec) => {
+      const isSelected = narrowHighlightStepIndex === sec.stepIndex;
+      const line = L.polyline(sec.points, {
+        color: '#f97316',
+        weight: isSelected ? 9 : 6,
+        opacity: isSelected ? 1 : 0.9,
+        dashArray: '8, 8',
+        lineCap: 'round',
+        lineJoin: 'round',
+      });
+      line.bindTooltip(
+        `${sec.name}（狭い道）${sec.estimatedWidth ? ` 幅員 ${sec.estimatedWidth}m` : ''}`,
+        { direction: 'top' }
+      );
+      layer.addLayer(line);
+    });
+
     // Fit route bounds nicely with padding (skip while driving to keep GPS follow stable)
     if (!isDriving) {
       const bounds = L.latLngBounds(routeResult.coordinates);
@@ -397,7 +471,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
         animate: true,
       });
     }
-  }, [routeResult, routeStart, routeEnd, isDriving]);
+  }, [routeResult, routeStart, routeEnd, isDriving, narrowHighlightStepIndex]);
 
   // Measurement Line & Markers
   useEffect(() => {
