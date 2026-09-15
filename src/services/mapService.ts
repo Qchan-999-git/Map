@@ -309,7 +309,8 @@ export async function calculateRoute(
             baseAnalysis,
             result.coordinates,
             narrowRoadThreshold,
-            narrowVerifyController.signal
+            narrowVerifyController.signal,
+            result.steps
           );
           result.narrowRoadAnalysis = verified;
           applyNarrowLevels(result.steps, verified);
