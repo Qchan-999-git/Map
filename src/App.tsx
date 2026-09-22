@@ -35,6 +35,19 @@ const SAVED_SPOTS_STORAGE_KEY = 'map_app_saved_spots_v1';
 const DRIVER_PROFILE_STORAGE_KEY = 'map_app_driver_profile_v1';
 const AVOID_NARROW_STORAGE_KEY = 'navi_avoid_narrow_roads';
 const NARROW_THRESHOLD_STORAGE_KEY = 'navi_narrow_road_threshold';
+const WEATHER_VISIBLE_STORAGE_KEY = 'navi_show_weather';
+const TRAFFIC_VISIBLE_STORAGE_KEY = 'navi_show_traffic';
+
+/** localStorage から boolean 設定を読む（壊れている場合は defaultValue） */
+function readBooleanSetting(key: string, defaultValue: boolean): boolean {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored !== null) return stored === 'true';
+  } catch {
+    // ignore
+  }
+  return defaultValue;
+}
 
 export default function App() {
   // Base map layer state
@@ -113,6 +126,14 @@ export default function App() {
     }
     return false;
   });
+
+  // 気象・混雑情報の表示 ON/OFF（localStorage 永続化）
+  const [showWeather, setShowWeather] = useState<boolean>(() =>
+    readBooleanSetting(WEATHER_VISIBLE_STORAGE_KEY, true)
+  );
+  const [showTraffic, setShowTraffic] = useState<boolean>(() =>
+    readBooleanSetting(TRAFFIC_VISIBLE_STORAGE_KEY, true)
+  );
   const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
     try {
       const stored = localStorage.getItem(NARROW_THRESHOLD_STORAGE_KEY);
@@ -190,6 +211,23 @@ export default function App() {
       // ignore
     }
   }, [narrowRoadThreshold]);
+
+  // 気象・混雑表示設定の永続化
+  useEffect(() => {
+    try {
+      localStorage.setItem(WEATHER_VISIBLE_STORAGE_KEY, String(showWeather));
+    } catch {
+      // ignore
+    }
+  }, [showWeather]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TRAFFIC_VISIBLE_STORAGE_KEY, String(showTraffic));
+    } catch {
+      // ignore
+    }
+  }, [showTraffic]);
 
   // 目的地が変わったら駐車場の検索結果をクリア
   useEffect(() => {
@@ -290,7 +328,7 @@ export default function App() {
         mode,
         profile,
         vehicle,
-        { avoidNarrowRoads, narrowRoadThreshold }
+        { avoidNarrowRoads, narrowRoadThreshold, includeWeather: showWeather, includeTraffic: showTraffic }
       );
       setRouteResult(result);
       setNarrowHighlightStepIndex(null);
@@ -562,6 +600,10 @@ export default function App() {
               selectedParkingId={selectedParkingId}
               onSearchParking={handleSearchParking}
               onSelectParking={handleSelectParking}
+              showWeather={showWeather}
+              onToggleWeather={() => setShowWeather((v) => !v)}
+              showTraffic={showTraffic}
+              onToggleTraffic={() => setShowTraffic((v) => !v)}
             />
           )}
 

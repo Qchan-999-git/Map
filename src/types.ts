@@ -71,6 +71,43 @@ export interface SearchResultItem {
 
 export type NarrowLevel = 'unknown' | 'wide' | 'narrow' | 'very_narrow';
 
+export type WeatherCategory =
+  | 'clear'
+  | 'partly'
+  | 'rain'
+  | 'snow'
+  | 'fog'
+  | 'thunder'
+  | 'other';
+
+/** 地点ごとの天気（Open-Meteo の現在値 + 今後数時間の降水確率） */
+export interface WeatherCondition {
+  label: string; // 出発地 / 途中 / 目的地
+  lat: number;
+  lng: number;
+  ok: boolean; // この地点の取得成功フラグ
+  temperature: number | null; // ℃
+  weatherCode: number | null; // WMO weather code
+  precipitation: number | null; // mm/h（現在）
+  windSpeed: number | null; // km/h（現在）
+  precipitationProbability: number | null; // %（今後数時間の最大）
+  category: WeatherCategory;
+  isPrecipitating: boolean; // 現在 雨・雪などの降水あり
+  isFreezingRisk: boolean; // 気温1℃以下 かつ 降水あり（凍結の恐れ）
+  isWindy: boolean; // 風速30km/h以上
+}
+
+/** ルート全体の気象情報 */
+export interface RouteWeather {
+  start: WeatherCondition;
+  midpoint: WeatherCondition;
+  end: WeatherCondition;
+  cautions: string[]; // 天候由来の注意文
+  durationFactor: number; // 所要時間補正係数（定数から算出）
+  fetchedAt: number;
+  error?: boolean; // 全地点の取得に失敗した（表示のみ）
+}
+
 export interface NarrowSegment {
   stepIndex: number;
   name: string;          // 名前なしの場合は '名称のない道路'
@@ -104,6 +141,7 @@ export interface RouteResult {
   coordinates: [number, number][]; // [lat, lng]
   totalDistance: number; // meters
   totalDuration: number; // seconds
+  estimatedDuration?: number; // 混雑・天候を反映した推定所要時間（seconds）
   steps: RouteStep[];
   mode: TravelMode;
   vehicleType?: VehicleType;
@@ -114,6 +152,7 @@ export interface RouteResult {
   leftTurnCount?: number;
   alternatives?: RouteResult[];
   narrowRoadAnalysis?: NarrowRoadAnalysis;
+  weather?: RouteWeather | null; // null = 取得失敗（表示のみ）
 }
 
 export interface ClickedLocationInfo {

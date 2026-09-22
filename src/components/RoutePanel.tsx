@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, ParkingCircle, Wallet, Layers, CircleAlert } from 'lucide-react';
+import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, ParkingCircle, Wallet, Layers, CircleAlert, Cloud, CarFront } from 'lucide-react';
 import { DriverProfile, GeoPoint, ParkingSpot, RouteResult, TravelMode, VehicleDifficulty, VehicleType } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
 import { VEHICLE_ICONS, VEHICLE_PROFILE_LIST, VEHICLE_PROFILES } from '../data/vehicleProfiles';
@@ -8,6 +8,7 @@ import { LaneGuidanceCard } from './LaneGuidanceCard';
 import { ShutoMergeAssist } from './ShutoMergeAssist';
 import { ElevatedBadge } from './ElevatedBadge';
 import { TimeRestrictionCard } from './TimeRestrictionCard';
+import { WeatherCard } from './WeatherCard';
 import { NarrowRoadCard } from './NarrowRoadCard';
 import { checkTimeRestrictions } from '../services/timeRestriction';
 import { DriveModeCard } from './DriveModeCard';
@@ -53,6 +54,10 @@ interface RoutePanelProps {
   selectedParkingId: string | null;
   onSearchParking: () => void;
   onSelectParking: (spot: ParkingSpot | null) => void;
+  showWeather: boolean;
+  onToggleWeather: () => void;
+  showTraffic: boolean;
+  onToggleTraffic: () => void;
 }
 
 const DIFFICULTY_STYLES: Record<VehicleDifficulty, { label: string; className: string }> = {
@@ -159,6 +164,10 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   selectedParkingId,
   onSearchParking,
   onSelectParking,
+  showWeather,
+  onToggleWeather,
+  showTraffic,
+  onToggleTraffic,
 }) => {
   const [mode, setMode] = useState<TravelMode>('driving');
   const [voiceOn, setVoiceOn] = useState(true);
@@ -443,6 +452,70 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
               </p>
             </div>
           )}
+        </div>
+
+        {/* 表示情報（気象・混雑）の ON/OFF */}
+        <div className="rounded-xl border border-neutral-200 bg-white p-3 space-y-2.5">
+          <div className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
+            表示情報
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <Cloud size={13} className="text-sky-500" />
+              <span className="text-xs font-bold text-neutral-700">気象情報</span>
+              <span className="text-[10px] text-neutral-400 hidden sm:inline">
+                道中の天気と所要時間補正
+              </span>
+            </div>
+            <button
+              id="toggle-show-weather"
+              role="switch"
+              aria-checked={showWeather}
+              onClick={() => {
+                onToggleWeather();
+              }}
+              className={`relative w-10 h-5.5 rounded-full transition-colors duration-200 flex-shrink-0 ${
+                showWeather ? 'bg-sky-500' : 'bg-neutral-300'
+              }`}
+              style={{ height: 22 }}
+            >
+              <span
+                className={`absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-all duration-200 ${
+                  showWeather ? 'left-[19px]' : 'left-0.5'
+                }`}
+                style={{ width: 18, height: 18, top: 2 }}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <CarFront size={13} className="text-amber-500" />
+              <span className="text-xs font-bold text-neutral-700">混雑情報</span>
+              <span className="text-[10px] text-neutral-400 hidden sm:inline">
+                時間帯から推定・所要時間補正
+              </span>
+            </div>
+            <button
+              id="toggle-show-traffic"
+              role="switch"
+              aria-checked={showTraffic}
+              onClick={() => {
+                onToggleTraffic();
+              }}
+              className={`relative w-10 h-5.5 rounded-full transition-colors duration-200 flex-shrink-0 ${
+                showTraffic ? 'bg-amber-500' : 'bg-neutral-300'
+              }`}
+              style={{ height: 22 }}
+            >
+              <span
+                className={`absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-all duration-200 ${
+                  showTraffic ? 'left-[19px]' : 'left-0.5'
+                }`}
+                style={{ width: 18, height: 18, top: 2 }}
+              />
+            </button>
+          </div>
         </div>
 
         {/* Travel Mode Toggle */}
@@ -731,6 +804,9 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
         {/* Time-based closure check (always visible: school zone / Ginza hokoten / timed no-right-turn) */}
         <TimeRestrictionCard statuses={timeStatuses} nowLabel={nowLabel} />
 
+        {/* Weather info (driving only; fetch failure is display-only) */}
+        {mode === 'driving' && <WeatherCard weather={routeResult?.weather} />}
+
         {routeResult ? (
           <>
             {/* Narrow road avoidance result (near TimeRestrictionCard) */}
@@ -795,8 +871,15 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                 <div>
                   <div className="text-[11px] text-blue-600 font-semibold uppercase">所要時間・距離</div>
                   <div className="text-2xl font-bold text-neutral-900 mt-0.5">
-                    {formatDuration(routeResult.totalDuration)}
+                    {routeResult.estimatedDuration !== undefined
+                      ? formatDuration(routeResult.estimatedDuration)
+                      : formatDuration(routeResult.totalDuration)}
                   </div>
+                  {routeResult.estimatedDuration !== undefined && (
+                    <div className="text-[10px] text-neutral-500 mt-0.5">
+                      基準 {formatDuration(routeResult.totalDuration)}（天候・混雑反映）
+                    </div>
+                  )}
                 </div>
                 <div className="text-right">
                   <div className="text-base font-bold text-neutral-800">

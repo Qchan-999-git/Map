@@ -2,6 +2,8 @@ import { ClickedLocationInfo, DriverProfile, ParkingSpot, RouteResult, RouteStep
 import { DriverProfileConfig, getDriverProfileConfig } from '../data/driverProfiles';
 import { VEHICLE_PROFILES } from '../data/vehicleProfiles';
 import { analyzeNarrowRoads, verifyNarrowRoads } from './narrowRoad';
+import { analyzeElevated } from './elevated';
+import { getRouteWeather, WEATHER_STRESS_SCORE_ADD } from './weather';
 
 /**
  * Calculates distance between two LatLng points using the Haversine formula (in meters).
@@ -262,6 +264,41 @@ export async function getLocationDetails(lat: number, lng: number): Promise<Clic
 export interface RouteOptions {
   avoidNarrowRoads?: boolean;
   narrowRoadThreshold?: number; // meters, default 4.0
+  includeWeather?: boolean; // 気象情報を取得して所要時間・注意点へ反映する
+  includeTraffic?: boolean; // 混雑情報を推定して所要時間・注意点へ反映する
+}
+
+/**
+ * 気象情報を結果へ反映する（driving のみ）。外部APIの失敗はルート検索を失敗させない。
+ * - 所要時間に durationFactor を乗じた estimatedDuration を設定
+ * - cautions に天候の注意点を追記
+ * - 初心者・高齢者・ゆとりでは stressScore に加点
+ */
+async function applyWeather(
+  result: RouteResult,
+  driverProfile: DriverProfile
+): Promise<void> {
+  if (result.mode !== 'driving' || result.coordinates.length < 2) return;
+  try {
+    const elevatedSpan = analyzeElevated(result.steps).usesHighway;
+    const weather = await getRouteWeather(result.coordinates, elevatedSpan);
+    if (!weather) return;
+    result.weather = weather;
+    result.estimatedDuration = Math.round(result.totalDuration * weather.durationFactor);
+    if (weather.cautions.length > 0) {
+      result.cautions = [...(result.cautions ?? []), ...weather.cautions];
+    }
+    const isStressProfile =
+      driverProfile === 'beginner' || driverProfile === 'elderly' || driverProfile === 'yutori';
+    if (isStressProfile && result.stressScore !== undefined && weather.cautions.length > 0) {
+      result.stressScore =
+        Math.round(
+          (result.stressScore + WEATHER_STRESS_SCORE_ADD * weather.cautions.length) * 10
+        ) / 10;
+    }
+  } catch (err) {
+    console.warn('Weather integration skipped:', err);
+  }
 }
 
 // ルート再計算時に前回の Overpass 検証を中断するためのコントローラ
@@ -414,6 +451,8 @@ export async function calculateRoute(
         }
       }
 
+      if (options?.includeWeather) await applyWeather(result, driverProfile);
+
       return result;
     }
   } catch (err) {
@@ -452,6 +491,7 @@ export async function calculateRoute(
   if (avoidNarrowRoads) {
     fallback.narrowRoadAnalysis = analyzeNarrowRoads(fallback.steps, narrowRoadThreshold);
   }
+  if (options?.includeWeather) await applyWeather(fallback, driverProfile);
   return fallback;
 }
 
