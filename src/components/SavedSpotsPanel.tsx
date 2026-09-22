@@ -65,7 +65,7 @@ export const SavedSpotsPanel: React.FC<SavedSpotsPanelProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white/95 backdrop-blur-md border-r border-neutral-200/90 shadow-2xl w-full sm:w-96 text-neutral-800 z-40">
+    <div className="flex flex-col h-full bg-white/95 backdrop-blur-md border-r border-neutral-200/90 shadow-2xl w-full text-neutral-800 z-40">
       {/* Header */}
       <div className="p-4 border-b border-neutral-200/80 flex items-center justify-between bg-neutral-50/70">
         <div className="flex items-center gap-2 font-bold text-base text-neutral-900">

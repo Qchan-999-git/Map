@@ -1,14 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Layers, Check } from 'lucide-react';
+import { Layers, Check, CloudRain } from 'lucide-react';
 import { MapLayerConfig } from '../types';
 import { MAP_LAYERS } from '../data/mapLayers';
 
 interface LayerSelectorProps {
   currentLayer: MapLayerConfig;
   onSelectLayer: (layer: MapLayerConfig) => void;
+  showRain?: boolean;
+  onToggleRain?: () => void;
 }
 
-export const LayerSelector: React.FC<LayerSelectorProps> = ({ currentLayer, onSelectLayer }) => {
+export const LayerSelector: React.FC<LayerSelectorProps> = ({
+  currentLayer,
+  onSelectLayer,
+  showRain = false,
+  onToggleRain,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -89,6 +96,31 @@ export const LayerSelector: React.FC<LayerSelectorProps> = ({ currentLayer, onSe
               );
             })}
           </div>
+
+          {/* 雨雲レーダー切替 */}
+          {onToggleRain != null && (
+            <button
+              id="toggle-rain-btn"
+              onClick={() => {
+                onToggleRain();
+                setIsOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 p-2 rounded-xl text-left transition-all ${
+                showRain
+                  ? 'bg-sky-50 border border-sky-200 text-sky-900 font-medium'
+                  : 'hover:bg-neutral-100/80 border border-transparent text-neutral-800'
+              }`}
+            >
+              <div className="w-7 h-7 rounded-lg bg-sky-600 text-white flex items-center justify-center flex-shrink-0 shadow-xs">
+                <CloudRain size={14} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold">雨雲レーダー</div>
+                <div className="text-[10px] text-neutral-500 truncate">リアルタイム雨雲を地図上に表示</div>
+              </div>
+              {showRain && <Check size={14} className="text-sky-600" />}
+            </button>
+          )}
         </div>
       )}
     </div>

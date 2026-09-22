@@ -1,7 +1,19 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { ClickedLocationInfo, GeoPoint, MapLayerConfig, ParkingSpot, RouteResult, RouteStep, SavedSpot } from '../types';
+import { ClickedLocationInfo, GeoPoint, MapLayerConfig, ParkingSpot, RouteResult, RouteStep, SavedSpot, CongestionLevel } from '../types';
 import { CATEGORY_INFO } from '../data/mapLayers';
+import {
+  drawPrecipField,
+  loadRainRadar,
+  makeSimulationFrames,
+  fetchOpenMeteoGrid,
+  RainFrame,
+  RainSource,
+  RAINVIEWER_MAX_NATIVE_ZOOM,
+  RAIN_TILE_OPACITY,
+  RAIN_PLAYBACK_INTERVAL_MS,
+} from '../services/rainRadar';
+import { RainRadarPanel } from './RainRadarPanel';
 
 interface MapContainerProps {
   currentLayer: MapLayerConfig;
@@ -24,6 +36,10 @@ interface MapContainerProps {
   onMapMove: (center: { lat: number; lng: number }, zoom: number) => void;
   focusPoint: GeoPoint | null;
   narrowHighlightStepIndex?: number | null;
+  showRain?: boolean;
+  rainForceSim?: boolean;
+  onRainSourceChange?: (source: RainSource | null) => void;
+  mapLeftOffset?: number;
 }
 
 interface NarrowSection {
@@ -79,6 +95,40 @@ function nearestCoordIndex(
   return best;
 }
 
+const CONGESTION_COLOR: Record<CongestionLevel, string> = {
+  smooth: '#10b981',
+  moderate: '#f59e0b',
+  heavy: '#ef4444',
+};
+
+const CONGESTION_LABEL: Record<CongestionLevel, string> = {
+  smooth: '順調',
+  moderate: 'やや混雑',
+  heavy: '混雑',
+};
+
+/**
+ * 混雑解析済みの区間（congestion.segments）をルートポリライン座標の区間へ分解する。
+ * 狭路と同じくステップの maneuver 地点を区切りの目安に使う。
+ */
+function buildCongestionSections(
+  coordinates: [number, number][],
+  sections: { stepIndex: number; name: string; level: CongestionLevel }[]
+): { stepIndex: number; name: string; level: CongestionLevel; points: [number, number][] }[] {
+  return sections
+    .map((sec) => {
+      const st = sec.stepIndex;
+      const endLoc = st === 0 ? coordinates[0] : coordinates[st];
+      const startLoc = st === 0 ? coordinates[0] : coordinates[st - 1];
+      const startIdx = nearestCoordIndex(coordinates, startLoc);
+      const endIdx = nearestCoordIndex(coordinates, endLoc);
+      const points = coordinates.slice(Math.min(startIdx, endIdx), Math.max(startIdx, endIdx) + 1);
+      if (points.length < 2) return null;
+      return { stepIndex: st, name: sec.name, level: sec.level, points };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+}
+
 export const MapContainer: React.FC<MapContainerProps> = ({
   currentLayer,
   savedSpots,
@@ -100,6 +150,10 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   onMapMove,
   focusPoint,
   narrowHighlightStepIndex,
+  showRain = false,
+  rainForceSim = false,
+  onRainSourceChange,
+  mapLeftOffset = 0,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -112,6 +166,27 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const measureLayerRef = useRef<L.LayerGroup | null>(null);
   const locationLayerRef = useRef<L.LayerGroup | null>(null);
+
+  // 雨雲レーダー（オーバーレイは tilePane と overlayPane の間の専用 pane に置く）
+  const rainTileLayerRef = useRef<L.TileLayer | null>(null);
+  const rainCanvasOverlayRef = useRef<L.ImageOverlay | null>(null);
+  const rainCanvasElemRef = useRef<HTMLCanvasElement | null>(null);
+  const rainFrameBoundsRef = useRef<{ north: number; south: number; west: number; east: number } | null>(null);
+  const [rainState, setRainState] = useState<{ source: RainSource; frames: RainFrame[] } | null>(
+    null
+  );
+  const [rainFrameIndex, setRainFrameIndex] = useState(0);
+  const [rainPlaying, setRainPlaying] = useState(true);
+
+  // 表示範囲を取得するヘルパー
+  const getMapBounds = useCallback((): { north: number; south: number; west: number; east: number } => {
+    const map = mapInstanceRef.current;
+    if (!map) {
+      return { north: 36, south: 34.5, west: 138, east: 141 }; // 東京周辺
+    }
+    const b = map.getBounds();
+    return { north: b.getNorth(), south: b.getSouth(), west: b.getWest(), east: b.getEast() };
+  }, []);
 
   // Initialize Map
   useEffect(() => {
@@ -138,6 +213,13 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     routeLayerRef.current = L.layerGroup().addTo(map);
     measureLayerRef.current = L.layerGroup().addTo(map);
     locationLayerRef.current = L.layerGroup().addTo(map);
+
+    // 雨雲レーダー用パネル（tilePane=200 と overlayPane=400 の間に置き、ルート線より下へ）
+    if (!map.getPane('rain')) {
+      const pane = map.createPane('rain');
+      pane.style.zIndex = '380';
+      pane.style.pointerEvents = 'none';
+    }
 
     // Track movement
     map.on('moveend', () => {
@@ -461,6 +543,26 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     });
     layer.addLayer(mainPolyline);
 
+    // Congestion segments overlay (driving, drawn right after main line,
+    // before merge pins / narrow highlights)
+    if (routeResult.congestion && routeResult.congestion.segments.length > 0) {
+      const congSections = buildCongestionSections(
+        routeResult.coordinates,
+        routeResult.congestion.segments
+      );
+      congSections.forEach((sec) => {
+        const line = L.polyline(sec.points, {
+          color: CONGESTION_COLOR[sec.level],
+          weight: 7,
+          opacity: 0.85,
+          lineCap: 'round',
+          lineJoin: 'round',
+        });
+        line.bindTooltip(`${sec.name}（${CONGESTION_LABEL[sec.level]}）`, { direction: 'top' });
+        layer.addLayer(line);
+      });
+    }
+
     // Start Point Pin (Green)
     if (routeStart) {
       const startHtml = `
@@ -553,12 +655,157 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     if (!isDriving) {
       const bounds = L.latLngBounds(routeResult.coordinates);
       map.fitBounds(bounds, {
-        padding: [60, 60],
+        paddingTopLeft: [mapLeftOffset, 60],
+        paddingBottomRight: [60, 60],
         maxZoom: 17,
         animate: true,
       });
     }
-  }, [routeResult, routeStart, routeEnd, isDriving, narrowHighlightStepIndex]);
+  }, [routeResult, routeStart, routeEnd, isDriving, narrowHighlightStepIndex, mapLeftOffset]);
+
+  // Rain radar state sync (for moveend refetch)
+  const rainSourceRef = useRef<RainSource | null>(null);
+  useEffect(() => {
+    rainSourceRef.current = rainState?.source ?? null;
+  }, [rainState]);
+
+  // 雨雲レーダーのデータ取得（初回 ON 時・forceSim 変更時）
+  useEffect(() => {
+    if (!showRain) {
+      setRainState(null);
+      setRainFrameIndex(0);
+      setRainPlaying(true);
+      onRainSourceChange?.(null);
+      return;
+    }
+    let cancelled = false;
+    const bounds = getMapBounds();
+    loadRainRadar(rainForceSim, bounds)
+      .then((res) => {
+        if (cancelled) return;
+        rainFrameBoundsRef.current = res.source === 'rainviewer' ? null : bounds;
+        setRainState({ source: res.source, frames: res.frames });
+        setRainFrameIndex(Math.max(0, res.frames.length - 1));
+        setRainPlaying(true);
+        onRainSourceChange?.(res.source);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const frames = makeSimulationFrames(bounds);
+        rainFrameBoundsRef.current = bounds;
+        setRainState({ source: 'simulation', frames });
+        setRainFrameIndex(Math.max(0, frames.length - 1));
+        setRainPlaying(true);
+        onRainSourceChange?.('simulation');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showRain, rainForceSim, getMapBounds, onRainSourceChange]);
+
+  // 表示範囲が変わったら Open-Meteo / シミュレーションを再取得（デバウンス）
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !showRain) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onMoveEnd = () => {
+      const src = rainSourceRef.current;
+      if (src !== 'openmeteo' && src !== 'simulation') return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const bounds = getMapBounds();
+        rainFrameBoundsRef.current = bounds;
+        if (src === 'openmeteo') {
+          fetchOpenMeteoGrid(bounds)
+            .then((frames) => {
+              if (rainSourceRef.current !== 'openmeteo') return;
+              setRainState({ source: 'openmeteo', frames });
+              setRainFrameIndex((i) => Math.min(i, frames.length - 1));
+            })
+            .catch(() => {
+              const frames = makeSimulationFrames(bounds);
+              rainFrameBoundsRef.current = bounds;
+              setRainState({ source: 'simulation', frames });
+              setRainFrameIndex((i) => Math.min(i, frames.length - 1));
+              onRainSourceChange?.('simulation');
+            });
+        } else {
+          const frames = makeSimulationFrames(bounds);
+          setRainState({ source: 'simulation', frames });
+          setRainFrameIndex((i) => Math.min(i, frames.length - 1));
+        }
+      }, 500);
+    };
+    map.on('moveend', onMoveEnd);
+    return () => {
+      map.off('moveend', onMoveEnd);
+      if (timer) clearTimeout(timer);
+    };
+  }, [showRain, getMapBounds, onRainSourceChange]);
+
+  // アニメ再生（過去→現在 を巡回）
+  useEffect(() => {
+    if (!rainPlaying || !rainState || rainState.frames.length <= 1) return;
+    const frameCount = rainState.frames.length;
+    const t = setInterval(() => {
+      setRainFrameIndex((i) => (i + 1) % frameCount);
+    }, RAIN_PLAYBACK_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [rainPlaying, rainState]);
+
+  // 雨雲レーダーのオーバーレイ描画（タイル or canvas ヒートマップ）
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (rainTileLayerRef.current) {
+      map.removeLayer(rainTileLayerRef.current);
+      rainTileLayerRef.current = null;
+    }
+    if (rainCanvasOverlayRef.current) {
+      map.removeLayer(rainCanvasOverlayRef.current);
+      rainCanvasOverlayRef.current = null;
+    }
+
+    if (!showRain || !rainState || rainState.frames.length === 0) return;
+    const frame = rainState.frames[Math.min(rainFrameIndex, rainState.frames.length - 1)];
+
+    if (rainState.source === 'rainviewer' && frame.tileUrl) {
+      const layer = L.tileLayer(frame.tileUrl, {
+        opacity: RAIN_TILE_OPACITY,
+        pane: 'rain',
+        maxNativeZoom: RAINVIEWER_MAX_NATIVE_ZOOM,
+        maxZoom: 19,
+        crossOrigin: true,
+      });
+      rainTileLayerRef.current = layer;
+      layer.addTo(map);
+      return;
+    }
+
+    if (frame.cells) {
+      if (!rainCanvasElemRef.current) {
+        rainCanvasElemRef.current = document.createElement('canvas');
+      }
+      const canvas = rainCanvasElemRef.current;
+      canvas.width = 640;
+      canvas.height = 640;
+      const mapBounds = getMapBounds();
+      const frameBounds = rainFrameBoundsRef.current ?? mapBounds;
+      drawPrecipField(canvas, frame.cells, frameBounds, mapBounds);
+      const url = canvas.toDataURL('image/png');
+      const overlay = L.imageOverlay(url, [
+        [mapBounds.south, mapBounds.west],
+        [mapBounds.north, mapBounds.east],
+      ], {
+        opacity: RAIN_TILE_OPACITY,
+        pane: 'rain',
+        interactive: false,
+      });
+      rainCanvasOverlayRef.current = overlay;
+      overlay.addTo(map);
+    }
+  }, [rainState, rainFrameIndex, showRain, getMapBounds]);
 
   // Measurement Line & Markers
   useEffect(() => {
@@ -600,6 +847,22 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   return (
     <div className="relative w-full h-full">
       <div id="leaflet-map" ref={mapContainerRef} className="w-full h-full z-0 bg-neutral-900" />
+      {/* 雨雲レーダーUI（MapControls の上側、--map-controls-h は App 側で計測・設定） */}
+      {showRain && (
+        <div
+          className="absolute right-3 sm:right-4 z-20 pointer-events-none"
+          style={{ bottom: 'calc(var(--map-controls-h, 0px) + 1rem)' }}
+        >
+          <RainRadarPanel
+            source={rainState?.source ?? null}
+            frames={rainState?.frames ?? []}
+            frameIndex={rainFrameIndex}
+            playing={rainPlaying}
+            onTogglePlay={() => setRainPlaying((v) => !v)}
+            onSeek={setRainFrameIndex}
+          />
+        </div>
+      )}
     </div>
   );
 };

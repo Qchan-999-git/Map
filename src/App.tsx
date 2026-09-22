@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { MapContainer } from './components/MapContainer';
 import { SearchBar } from './components/SearchBar';
 import { LayerSelector } from './components/LayerSelector';
@@ -25,15 +25,34 @@ import { VEHICLE_PROFILES } from './data/vehicleProfiles';
 import {
   calculateHaversineDistance,
   calculateRoute,
+  formatDuration,
   getLocationDetails,
   searchNearbyParking,
 } from './services/mapService';
 import { Map as MapIcon, CheckCircle2, AlertCircle } from 'lucide-react';
+import { RainSource, detectRainOnRoute } from './services/rainRadar';
 
 const SAVED_SPOTS_STORAGE_KEY = 'map_app_saved_spots_v1';
 const DRIVER_PROFILE_STORAGE_KEY = 'map_app_driver_profile_v1';
 const AVOID_NARROW_STORAGE_KEY = 'navi_avoid_narrow_roads';
 const NARROW_THRESHOLD_STORAGE_KEY = 'navi_narrow_road_threshold';
+const WEATHER_VISIBLE_STORAGE_KEY = 'navi_show_weather';
+const TRAFFIC_VISIBLE_STORAGE_KEY = 'navi_show_traffic';
+const RAIN_VISIBLE_STORAGE_KEY = 'navi_show_rain';
+
+/** サイドパネルの幅（px）。ヘッダー・fitBounds のオフセットに使用 */
+const PANEL_WIDTH_PX = 420;
+
+/** localStorage から boolean 設定を読む（壊れている場合は defaultValue） */
+function readBooleanSetting(key: string, defaultValue: boolean): boolean {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored !== null) return stored === 'true';
+  } catch {
+    // ignore
+  }
+  return defaultValue;
+}
 
 export default function App() {
   // Base map layer state
@@ -64,6 +83,28 @@ export default function App() {
   // Panels & Tools
   const [activePanel, setActivePanel] = useState<'none' | 'route' | 'spots'>('none');
   const [isDriving, setIsDriving] = useState(false);
+  // ルートパネルの折りたたみ（地図を広く使う。デスクトップのみ）
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(min-width: 640px)').matches : true
+  );
+  useEffect(() => {
+    const mql = window.matchMedia('(min-width: 640px)');
+    const onChange = () => setIsDesktop(mql.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
+  // パネルを閉じたら折りたたみ状態も解除
+  useEffect(() => {
+    if (activePanel === 'none') setPanelCollapsed(false);
+  }, [activePanel]);
+
+  // パネル表示中はヘッダー・フッター・詳細カードをパネル幅ぶん右へずらす（デスクトップ）
+  const panelOpen = activePanel !== 'none';
+  const offsetRight = panelOpen && !panelCollapsed && isDesktop ? PANEL_WIDTH_PX + 16 : 0;
+  const routeMapLeftOffset =
+    activePanel === 'route' && !panelCollapsed && isDesktop ? PANEL_WIDTH_PX : 0;
 
   // Route Planning State
   const [routeStart, setRouteStart] = useState<GeoPoint | null>(null);
@@ -91,7 +132,8 @@ export default function App() {
         stored === 'standard' ||
         stored === 'beginner' ||
         stored === 'elderly' ||
-        stored === 'yutori'
+        stored === 'yutori' ||
+        stored === 'expert'
       ) {
         return stored;
       }
@@ -111,6 +153,41 @@ export default function App() {
     }
     return false;
   });
+
+  // 気象・混雑情報の表示 ON/OFF（localStorage 永続化）
+  const [showWeather, setShowWeather] = useState<boolean>(() =>
+    readBooleanSetting(WEATHER_VISIBLE_STORAGE_KEY, true)
+  );
+  const [showTraffic, setShowTraffic] = useState<boolean>(() =>
+    readBooleanSetting(TRAFFIC_VISIBLE_STORAGE_KEY, true)
+  );
+
+  // 雨雲レーダー表示（localStorage 永続化・localStorage 保存は既定 ON）
+  const [showRain, setShowRain] = useState<boolean>(() =>
+    readBooleanSetting(RAIN_VISIBLE_STORAGE_KEY, true)
+  );
+  const [rainForceSim] = useState<boolean>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('rain') === 'sim';
+    } catch {
+      return false;
+    }
+  });
+  const [rainSource, setRainSource] = useState<RainSource | null>(null);
+  const [routeRain, setRouteRain] = useState<boolean | null>(null);
+
+  // MapControls の高さを計測し、雨雲UIなどの配置をその上に積む（CSS 変数経由）
+  const controlsNavRef = useRef<HTMLElement | null>(null);
+  const [controlsHeight, setControlsHeight] = useState(0);
+  useEffect(() => {
+    const node = controlsNavRef.current;
+    if (!node) return;
+    const update = () => setControlsHeight(node.getBoundingClientRect().height);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [activePanel]);
   const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
     try {
       const stored = localStorage.getItem(NARROW_THRESHOLD_STORAGE_KEY);
@@ -188,6 +265,51 @@ export default function App() {
       // ignore
     }
   }, [narrowRoadThreshold]);
+
+  // 気象・混雑表示設定の永続化
+  useEffect(() => {
+    try {
+      localStorage.setItem(WEATHER_VISIBLE_STORAGE_KEY, String(showWeather));
+    } catch {
+      // ignore
+    }
+  }, [showWeather]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TRAFFIC_VISIBLE_STORAGE_KEY, String(showTraffic));
+    } catch {
+      // ignore
+    }
+  }, [showTraffic]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RAIN_VISIBLE_STORAGE_KEY, String(showRain));
+    } catch {
+      // ignore
+    }
+  }, [showRain]);
+
+  // ルート上に雨区間があるかを検出（シミュレーション表示時を除く）
+  useEffect(() => {
+    let cancelled = false;
+    if (!routeResult || showRain !== true || !rainSource || rainSource === 'simulation') {
+      setRouteRain(null);
+      return;
+    }
+    const coordinates: [number, number][] = routeResult.coordinates.map((c) => [c[0], c[1]]);
+    detectRainOnRoute(coordinates, rainSource)
+      .then((rain) => {
+        if (!cancelled) setRouteRain(rain);
+      })
+      .catch(() => {
+        if (!cancelled) setRouteRain(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [routeResult, rainSource, showRain]);
 
   // 目的地が変わったら駐車場の検索結果をクリア
   useEffect(() => {
@@ -288,11 +410,16 @@ export default function App() {
         mode,
         profile,
         vehicle,
-        { avoidNarrowRoads, narrowRoadThreshold }
+        { avoidNarrowRoads, narrowRoadThreshold, includeWeather: showWeather, includeTraffic: showTraffic }
       );
       setRouteResult(result);
       setNarrowHighlightStepIndex(null);
-      if (profile !== 'standard' && result.rightTurnCount !== undefined) {
+      if (profile === 'expert') {
+        showToast(
+          `最速ルート検索: 約 ${formatDuration(result.totalDuration)}`,
+          'success'
+        );
+      } else if (profile !== 'standard' && result.rightTurnCount !== undefined) {
         showToast(
           `ゆとりルート検索: 右折${result.rightTurnCount}回・ストレス${result.stressScore}`,
           'success'
@@ -461,7 +588,10 @@ export default function App() {
   };
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-neutral-900 font-sans">
+    <main
+      className="relative w-screen h-screen overflow-hidden bg-neutral-900 font-sans"
+      style={{ ['--map-controls-h']: `${controlsHeight}px` } as CSSProperties}
+    >
       {/* Fullscreen Map Layer */}
       <MapContainer
         currentLayer={currentLayer}
@@ -484,10 +614,17 @@ export default function App() {
         onMapMove={handleMapMove}
         focusPoint={focusPoint}
         narrowHighlightStepIndex={narrowHighlightStepIndex}
+        showRain={showRain}
+        rainForceSim={rainForceSim}
+        onRainSourceChange={setRainSource}
+        mapLeftOffset={routeMapLeftOffset}
       />
 
       {/* Top Floating Header & Search Bar */}
-      <header className="absolute top-3 left-3 right-3 sm:right-auto sm:left-4 z-30 flex items-start gap-2.5 pointer-events-none">
+      <header
+        className="absolute top-3 left-3 right-3 sm:right-auto sm:left-4 z-30 flex items-start gap-2.5 pointer-events-none transition-[left] duration-200"
+        style={offsetRight > 0 ? { left: offsetRight } : undefined}
+      >
         {/* Brand Pill */}
         <div className="hidden sm:flex items-center gap-2 px-3.5 py-3.5 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-neutral-200/80 pointer-events-auto">
           <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
@@ -512,13 +649,33 @@ export default function App() {
               setCurrentLayer(l);
               showToast(`「${l.name}」に切り替えました`, 'info');
             }}
+            showRain={showRain}
+            onToggleRain={() => {
+              setShowRain((v) => !v);
+              showToast(
+                !showRain ? '雨雲レーダーを表示します' : '雨雲レーダーを非表示にしました',
+                'info'
+              );
+            }}
           />
         </div>
       </header>
 
       {/* Sliding Side Drawers (Route or Saved Spots) */}
       {activePanel !== 'none' && (
-        <aside aria-label="サイドパネル" className="absolute top-0 left-0 bottom-0 z-40 animate-in slide-in-from-left duration-200 shadow-2xl">
+        <aside
+          aria-label="サイドパネル"
+          className={`absolute left-0 bottom-0 z-40 flex flex-col animate-in slide-in-from-bottom duration-300 sm:slide-in-from-left sm:duration-200 shadow-2xl ${
+            panelCollapsed && activePanel === 'route'
+              ? 'w-full h-16 sm:w-14 sm:top-0 sm:h-full sm:rounded-none rounded-t-2xl'
+              : 'w-full h-[76vh] sm:top-0 sm:h-full sm:w-[420px] sm:rounded-none rounded-t-2xl'
+          }`}
+        >
+          {/* モバイル用のドラッグハンドル */}
+          <div className="sm:hidden flex justify-center pt-2 pb-1">
+            <div className="w-10 h-1 rounded-full bg-neutral-300" />
+          </div>
+          <div className="flex-1 min-h-0">
           {activePanel === 'route' && (
             <RoutePanel
               routeStart={routeStart}
@@ -555,6 +712,14 @@ export default function App() {
               selectedParkingId={selectedParkingId}
               onSearchParking={handleSearchParking}
               onSelectParking={handleSelectParking}
+              showWeather={showWeather}
+              onToggleWeather={() => setShowWeather((v) => !v)}
+              showTraffic={showTraffic}
+              onToggleTraffic={() => setShowTraffic((v) => !v)}
+              routeRain={routeRain}
+              collapsed={panelCollapsed}
+              onCollapse={() => setPanelCollapsed(true)}
+              onExpand={() => setPanelCollapsed(false)}
             />
           )}
 
@@ -586,6 +751,7 @@ export default function App() {
               }}
             />
           )}
+          </div>
         </aside>
       )}
 
@@ -607,7 +773,10 @@ export default function App() {
 
       {/* Floating Spot Detail Card (Bottom left / bottom center) */}
       {clickedLocation && !isMeasuring && !isDriving && (
-        <div className="absolute bottom-10 left-3 sm:left-4 z-30 pointer-events-auto max-w-sm w-[calc(100%-1.5rem)] sm:w-96">
+        <div
+          className="absolute bottom-10 left-3 sm:left-4 z-50 pointer-events-auto max-w-sm w-[calc(100%-1.5rem)] sm:w-96 transition-[left] duration-200"
+          style={offsetRight > 0 ? { left: offsetRight } : undefined}
+        >
           <SpotDetailCard
             location={clickedLocation}
             existingSpot={selectedSpot}
@@ -617,11 +786,15 @@ export default function App() {
             }}
             onSetStart={(pt) => {
               setRouteStart(pt);
+              setClickedLocation(null);
+              setSelectedSpot(null);
               setActivePanel('route');
               if (routeEnd) handleCalculateRoute();
             }}
             onSetEnd={(pt) => {
               setRouteEnd(pt);
+              setClickedLocation(null);
+              setSelectedSpot(null);
               setActivePanel('route');
               if (routeStart) handleCalculateRoute();
             }}
@@ -631,7 +804,11 @@ export default function App() {
       )}
 
       {/* Right Floating Map Controls */}
-      <nav aria-label="地図操作コントロール" className="absolute right-3 bottom-10 sm:right-4 sm:bottom-12 z-30">
+      <nav
+        ref={controlsNavRef}
+        aria-label="地図操作コントロール"
+        className="absolute right-3 bottom-10 sm:right-4 sm:bottom-12 z-30"
+      >
         <MapControls
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
@@ -661,7 +838,10 @@ export default function App() {
       </nav>
 
       {/* Bottom Status Bar (Coordinates & Zoom Level) */}
-      <footer className="absolute bottom-2 left-3 sm:left-4 z-20 pointer-events-none hidden md:flex items-center gap-2 text-[11px] font-mono text-neutral-600 bg-white/80 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-neutral-200/60 shadow-xs">
+      <footer
+        className="absolute bottom-2 left-3 sm:left-4 z-20 pointer-events-none hidden md:flex items-center gap-2 text-[11px] font-mono text-neutral-600 bg-white/80 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-neutral-200/60 shadow-xs transition-[left] duration-200"
+        style={offsetRight > 0 ? { left: offsetRight } : undefined}
+      >
         <span>緯度: {mapCenter.lat.toFixed(4)}°</span>
         <span>経度: {mapCenter.lng.toFixed(4)}°</span>
         <span>ズーム: {mapZoom}</span>
