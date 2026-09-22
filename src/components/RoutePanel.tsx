@@ -106,6 +106,30 @@ const VehicleSummary: React.FC<{ vehicleType: VehicleType }> = ({ vehicleType })
   );
 };
 
+/** 上級者モード：最速案 vs 次点案 の時間差を表示する */
+const FastestVsNext: React.FC<{ alternatives: RouteResult[]; bestDuration: number }> = ({
+  alternatives,
+  bestDuration,
+}) => {
+  let nextBest = Infinity;
+  for (const alt of alternatives) {
+    if (alt.totalDuration < nextBest) nextBest = alt.totalDuration;
+  }
+  const diffSec = nextBest - bestDuration;
+  const diffMin = Math.round(diffSec / 60);
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-500">
+      <span className="px-1.5 py-0.5 rounded-full bg-neutral-900 text-white font-bold">
+        最速案
+      </span>
+      <span>
+        {Math.abs(diffMin)}分{bestDuration <= nextBest ? 'の短縮' : '次点が有利'}
+        （{alternatives.length}案から最速で選択）
+      </span>
+    </div>
+  );
+};
+
 export const RoutePanel: React.FC<RoutePanelProps> = ({
   routeStart,
   routeEnd,
@@ -161,6 +185,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
     [routeResult]
   );
   const earlyMeters = getDriverProfileConfig(driverProfile).earlyGuidanceMeters;
+  // 上級者モードでは案内カードをコンパクト表示にする
+  const isExpert = driverProfile === 'expert';
 
   // 時間通行止めチェック（1分ごとに再評価・初心者向け簡易表示）
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -313,7 +339,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
             <ShieldCheck size={14} className="text-emerald-600" />
             <span>運転タイプ</span>
           </div>
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-5 gap-1.5">
             {DRIVER_PROFILES.map((p) => (
               <button
                 key={p.id}
@@ -726,6 +752,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                 onStartTracking={autoSpeech.start}
                 onStopTracking={autoSpeech.stop}
                 trackError={autoSpeech.error}
+                compact={isExpert}
               />
             )}
 
@@ -736,6 +763,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                 totalDistance={routeResult.totalDistance}
                 remaining={autoSpeech.remaining}
                 tracking={autoSpeech.tracking}
+                compact={isExpert}
               />
             )}
 
@@ -779,16 +807,21 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                   </div>
                 </div>
               </div>
-              {/* Yutori stress summary */}
+              {/* Yutori / expert summary */}
               {routeResult.profile && routeResult.profile !== 'standard' && (
                 <div className="mt-2.5 pt-2.5 border-t border-blue-100/80 flex items-center gap-2 text-[11px]">
                   <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">
-                    ゆとり適用:{' '}
+                    {routeResult.profile === 'expert'
+                      ? '最速ルート適用'
+                      : 'ゆとり適用:'}
+                    {' '}
                     {routeResult.profile === 'beginner'
                       ? '初心者'
                       : routeResult.profile === 'elderly'
                         ? '高齢者'
-                        : 'ゆとり優先'}
+                        : routeResult.profile === 'expert'
+                          ? '上級者'
+                          : 'ゆとり優先'}
                   </span>
                   <span className="text-neutral-600">
                     右折 {routeResult.rightTurnCount ?? 0}回・左折 {routeResult.leftTurnCount ?? 0}回
@@ -798,7 +831,10 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                   )}
                 </div>
               )}
-              {routeResult.alternatives && routeResult.alternatives.length > 1 && (
+              {routeResult.profile === 'expert' && routeResult.alternatives && routeResult.alternatives.length > 1 && (
+                <FastestVsNext alternatives={routeResult.alternatives} bestDuration={routeResult.totalDuration} />
+              )}
+              {routeResult.profile !== 'expert' && routeResult.alternatives && routeResult.alternatives.length > 1 && (
                 <div className="mt-1.5 text-[11px] text-neutral-500">
                   {routeResult.alternatives.length}案から低ストレス順に選択
                 </div>

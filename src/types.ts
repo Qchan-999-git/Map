@@ -1,6 +1,6 @@
 export type TravelMode = 'driving' | 'walking' | 'cycling';
 
-export type DriverProfile = 'standard' | 'beginner' | 'elderly' | 'yutori';
+export type DriverProfile = 'standard' | 'beginner' | 'elderly' | 'yutori' | 'expert';
 
 export type VehicleType = 'kei' | 'standard' | 'large' | 'truck' | 'motorcycle';
 

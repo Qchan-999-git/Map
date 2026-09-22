@@ -14,6 +14,7 @@ interface LaneGuidanceCardProps {
   onStartTracking: () => void;
   onStopTracking: () => void;
   trackError: string | null;
+  compact?: boolean;
 }
 
 function DirectionIcon({ dir }: { dir: LaneAdvice['direction'] }) {
@@ -53,6 +54,7 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
   onStartTracking,
   onStopTracking,
   trackError,
+  compact = false,
 }) => {
   // Hands-free: announce first guidance once right after search (no tap)
   useEffect(() => {
@@ -65,13 +67,13 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
   }, [advices]);
 
   if (advices.length === 0) return null;
-  const visible = advices.slice(0, 3);
+  const visible = advices.slice(0, compact ? 1 : 3);
 
   return (
     <div className="bg-gradient-to-br from-emerald-50 to-teal-50/60 p-3.5 rounded-2xl border border-emerald-100 shadow-sm">
       <div className="flex items-center justify-between mb-2">
         <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">
-          ゆとり車線案内・自動（タップ不要）
+          {compact ? '次の案内・簡潔表示' : 'ゆとり車線案内・自動（タップ不要）'}
         </div>
         <button
           id="lane-voice-toggle-btn"
@@ -130,7 +132,7 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-neutral-800">
-                  {a.earlyMessage}
+                  {compact ? a.message : a.earlyMessage}
                 </div>
                 <div className="text-[11px] text-neutral-500 mt-0.5">
                   {rem !== undefined && tracking ? (
@@ -140,14 +142,16 @@ export const LaneGuidanceCard: React.FC<LaneGuidanceCardProps> = ({
                   )}
                   {a.roadName ? `・${a.roadName}` : ''}
                 </div>
-                <div className="text-[11px] text-emerald-700 mt-0.5">{a.message}</div>
+                {!compact && (
+                  <div className="text-[11px] text-emerald-700 mt-0.5">{a.message}</div>
+                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      {advices.length > 3 && (
+      {!compact && advices.length > 3 && (
         <div className="mt-1.5 text-[11px] text-neutral-500 text-center">
           他 {advices.length - 3} 件の案内あり（手順リスト参照）
         </div>

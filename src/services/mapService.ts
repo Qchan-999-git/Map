@@ -294,9 +294,10 @@ export async function calculateRoute(
   const resultVehicleType = mode === 'driving' ? vehicleType : undefined;
   const avoidNarrowRoads = options?.avoidNarrowRoads ?? false;
   const narrowRoadThreshold = options?.narrowRoadThreshold ?? 4.0;
+  // 上級者モードも含め、複数案を取得（fastest / 低ストレス の比較に使う）
   const wantAlternatives =
     mode === 'driving' &&
-    (driverProfile !== 'standard' || avoidNarrowRoads);
+    (driverProfile === 'expert' || driverProfile !== 'standard' || avoidNarrowRoads);
   // OSRM expects coordinates as: lng,lat ; lng,lat
   const url =
     `https://router.project-osrm.org/route/v1/${profile}/${start[1]},${start[0]};${end[1]},${end[0]}` +
@@ -359,11 +360,15 @@ export async function calculateRoute(
         };
       });
 
-      // standard: first (fastest) route. それ以外: 低ストレス順.
-      const preferLowStress = driverProfile !== 'standard' || avoidNarrowRoads;
-      const best = preferLowStress
-        ? [...scored].sort((a, b) => a.stressScore - b.stressScore)[0]
-        : scored[0];
+      // 上級者: 推定所要時間が最小の案。standard: 先頭（最速）案。それ以外: 低ストレス順.
+      const preferLowStress =
+        (driverProfile !== 'standard' && driverProfile !== 'expert') || avoidNarrowRoads;
+      const preferFastest = driverProfile === 'expert';
+      const best = preferFastest
+        ? [...scored].sort((a, b) => a.result.totalDuration - b.result.totalDuration)[0]
+        : preferLowStress
+          ? [...scored].sort((a, b) => a.stressScore - b.stressScore)[0]
+          : scored[0];
 
       const alternatives =
         candidates.length > 1

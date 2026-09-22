@@ -53,6 +53,16 @@ export const DRIVER_PROFILES: DriverProfileConfig[] = [
     trunkRoadBonus: 8,
     earlyGuidanceMeters: 1500,
   },
+  {
+    id: 'expert',
+    label: '上級者',
+    description: '最速ルート優先・案内は簡潔に',
+    rightTurnPenalty: 0,
+    narrowRoadPenalty: 0,
+    complexIntersectionPenalty: 0,
+    trunkRoadBonus: 0,
+    earlyGuidanceMeters: 300,
+  },
 ];
 
 export const DEFAULT_DRIVER_PROFILE: DriverProfile = 'standard';

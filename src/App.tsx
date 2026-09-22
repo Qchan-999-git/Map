@@ -25,6 +25,7 @@ import { VEHICLE_PROFILES } from './data/vehicleProfiles';
 import {
   calculateHaversineDistance,
   calculateRoute,
+  formatDuration,
   getLocationDetails,
   searchNearbyParking,
 } from './services/mapService';
@@ -91,7 +92,8 @@ export default function App() {
         stored === 'standard' ||
         stored === 'beginner' ||
         stored === 'elderly' ||
-        stored === 'yutori'
+        stored === 'yutori' ||
+        stored === 'expert'
       ) {
         return stored;
       }
@@ -292,7 +294,12 @@ export default function App() {
       );
       setRouteResult(result);
       setNarrowHighlightStepIndex(null);
-      if (profile !== 'standard' && result.rightTurnCount !== undefined) {
+      if (profile === 'expert') {
+        showToast(
+          `最速ルート検索: 約 ${formatDuration(result.totalDuration)}`,
+          'success'
+        );
+      } else if (profile !== 'standard' && result.rightTurnCount !== undefined) {
         showToast(
           `ゆとりルート検索: 右折${result.rightTurnCount}回・ストレス${result.stressScore}`,
           'success'

@@ -8,6 +8,7 @@ interface ShutoMergeAssistProps {
   totalDistance: number;
   remaining?: Map<number, number>;
   tracking?: boolean;
+  compact?: boolean;
 }
 
 /**
@@ -20,18 +21,18 @@ export const ShutoMergeAssist: React.FC<ShutoMergeAssistProps> = ({
   totalDistance,
   remaining,
   tracking,
+  compact = false,
 }) => {
   if (merges.length === 0) return null;
-  const visible = merges.slice(0, 2);
+  const visible = merges.slice(0, compact ? 1 : 2);
   const hasShuto = merges.some((m) => m.isShuto);
 
   return (
     <div className="bg-gradient-to-br from-orange-50 to-amber-50/60 p-3.5 rounded-2xl border border-orange-100 shadow-sm">
       <div className="text-[11px] font-bold text-orange-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
         <GitMerge size={14} />
-        <span>{hasShuto ? '首都高アシスト・合流準備' : '合流アシスト・心の準備'}</span>
+        <span>{hasShuto ? '首都高アシスト' : '合流アシスト'}</span>
       </div>
-
       <div className="space-y-2">
         {visible.map((m) => {
           const progress =
@@ -77,18 +78,20 @@ export const ShutoMergeAssist: React.FC<ShutoMergeAssistProps> = ({
                 <GitMerge size={14} className="text-orange-600 flex-shrink-0" />
               </div>
 
-              <div className="mt-1.5 text-[11px] text-neutral-600 flex items-start gap-1.5">
-                <HeartHandshake size={13} className="text-orange-500 flex-shrink-0 mt-0.5" />
-                <span>
-                  合流まで余裕を持って速度・車間を調整。本線の流れを確認して心の準備を。
-                </span>
-              </div>
+              {!compact && (
+                <div className="mt-1.5 text-[11px] text-neutral-600 flex items-start gap-1.5">
+                  <HeartHandshake size={13} className="text-orange-500 flex-shrink-0 mt-0.5" />
+                  <span>
+                    合流まで余裕を持って速度・車間を調整。本線の流れを確認して心の準備を。
+                  </span>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
 
-      {merges.length > 2 && (
+      {!compact && merges.length > 2 && (
         <div className="mt-1.5 text-[11px] text-neutral-500 text-center">
           他 {merges.length - 2} 件の合流あり
         </div>
