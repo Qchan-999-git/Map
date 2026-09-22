@@ -59,6 +59,7 @@ interface RoutePanelProps {
   onToggleWeather: () => void;
   showTraffic: boolean;
   onToggleTraffic: () => void;
+  routeRain: boolean | null;
 }
 
 const DIFFICULTY_STYLES: Record<VehicleDifficulty, { label: string; className: string }> = {
@@ -169,6 +170,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   onToggleWeather,
   showTraffic,
   onToggleTraffic,
+  routeRain,
 }) => {
   const [mode, setMode] = useState<TravelMode>('driving');
   const [voiceOn, setVoiceOn] = useState(true);
@@ -806,7 +808,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
         <TimeRestrictionCard statuses={timeStatuses} nowLabel={nowLabel} />
 
         {/* Weather info (driving only; fetch failure is display-only) */}
-        {mode === 'driving' && <WeatherCard weather={routeResult?.weather} />}
+        {mode === 'driving' && <WeatherCard weather={routeResult?.weather} routeRain={routeRain} />}
 
         {/* Congestion info (driving only; estimated from time-of-day) */}
         {mode === 'driving' && <CongestionCard congestion={routeResult?.congestion} />}

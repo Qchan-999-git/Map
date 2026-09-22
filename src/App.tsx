@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { MapContainer } from './components/MapContainer';
 import { SearchBar } from './components/SearchBar';
 import { LayerSelector } from './components/LayerSelector';
@@ -30,6 +30,7 @@ import {
   searchNearbyParking,
 } from './services/mapService';
 import { Map as MapIcon, CheckCircle2, AlertCircle } from 'lucide-react';
+import { RainSource, detectRainOnRoute } from './services/rainRadar';
 
 const SAVED_SPOTS_STORAGE_KEY = 'map_app_saved_spots_v1';
 const DRIVER_PROFILE_STORAGE_KEY = 'map_app_driver_profile_v1';
@@ -37,6 +38,7 @@ const AVOID_NARROW_STORAGE_KEY = 'navi_avoid_narrow_roads';
 const NARROW_THRESHOLD_STORAGE_KEY = 'navi_narrow_road_threshold';
 const WEATHER_VISIBLE_STORAGE_KEY = 'navi_show_weather';
 const TRAFFIC_VISIBLE_STORAGE_KEY = 'navi_show_traffic';
+const RAIN_VISIBLE_STORAGE_KEY = 'navi_show_rain';
 
 /** localStorage から boolean 設定を読む（壊れている場合は defaultValue） */
 function readBooleanSetting(key: string, defaultValue: boolean): boolean {
@@ -134,6 +136,33 @@ export default function App() {
   const [showTraffic, setShowTraffic] = useState<boolean>(() =>
     readBooleanSetting(TRAFFIC_VISIBLE_STORAGE_KEY, true)
   );
+
+  // 雨雲レーダー表示（localStorage 永続化・localStorage 保存は既定 ON）
+  const [showRain, setShowRain] = useState<boolean>(() =>
+    readBooleanSetting(RAIN_VISIBLE_STORAGE_KEY, true)
+  );
+  const [rainForceSim] = useState<boolean>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('rain') === 'sim';
+    } catch {
+      return false;
+    }
+  });
+  const [rainSource, setRainSource] = useState<RainSource | null>(null);
+  const [routeRain, setRouteRain] = useState<boolean | null>(null);
+
+  // MapControls の高さを計測し、雨雲UIなどの配置をその上に積む（CSS 変数経由）
+  const controlsNavRef = useRef<HTMLElement | null>(null);
+  const [controlsHeight, setControlsHeight] = useState(0);
+  useEffect(() => {
+    const node = controlsNavRef.current;
+    if (!node) return;
+    const update = () => setControlsHeight(node.getBoundingClientRect().height);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [activePanel]);
   const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
     try {
       const stored = localStorage.getItem(NARROW_THRESHOLD_STORAGE_KEY);
@@ -228,6 +257,34 @@ export default function App() {
       // ignore
     }
   }, [showTraffic]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RAIN_VISIBLE_STORAGE_KEY, String(showRain));
+    } catch {
+      // ignore
+    }
+  }, [showRain]);
+
+  // ルート上に雨区間があるかを検出（シミュレーション表示時を除く）
+  useEffect(() => {
+    let cancelled = false;
+    if (!routeResult || showRain !== true || !rainSource || rainSource === 'simulation') {
+      setRouteRain(null);
+      return;
+    }
+    const coordinates: [number, number][] = routeResult.coordinates.map((c) => [c[0], c[1]]);
+    detectRainOnRoute(coordinates, rainSource)
+      .then((rain) => {
+        if (!cancelled) setRouteRain(rain);
+      })
+      .catch(() => {
+        if (!cancelled) setRouteRain(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [routeResult, rainSource, showRain]);
 
   // 目的地が変わったら駐車場の検索結果をクリア
   useEffect(() => {
@@ -506,7 +563,10 @@ export default function App() {
   };
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-neutral-900 font-sans">
+    <main
+      className="relative w-screen h-screen overflow-hidden bg-neutral-900 font-sans"
+      style={{ ['--map-controls-h']: `${controlsHeight}px` } as CSSProperties}
+    >
       {/* Fullscreen Map Layer */}
       <MapContainer
         currentLayer={currentLayer}
@@ -529,6 +589,10 @@ export default function App() {
         onMapMove={handleMapMove}
         focusPoint={focusPoint}
         narrowHighlightStepIndex={narrowHighlightStepIndex}
+        showRain={showRain}
+        rainForceSim={rainForceSim}
+        onRainSourceChange={setRainSource}
+        mapLeftOffset={0}
       />
 
       {/* Top Floating Header & Search Bar */}
@@ -556,6 +620,14 @@ export default function App() {
             onSelectLayer={(l) => {
               setCurrentLayer(l);
               showToast(`「${l.name}」に切り替えました`, 'info');
+            }}
+            showRain={showRain}
+            onToggleRain={() => {
+              setShowRain((v) => !v);
+              showToast(
+                !showRain ? '雨雲レーダーを表示します' : '雨雲レーダーを非表示にしました',
+                'info'
+              );
             }}
           />
         </div>
@@ -604,6 +676,7 @@ export default function App() {
               onToggleWeather={() => setShowWeather((v) => !v)}
               showTraffic={showTraffic}
               onToggleTraffic={() => setShowTraffic((v) => !v)}
+              routeRain={routeRain}
             />
           )}
 
@@ -684,7 +757,11 @@ export default function App() {
       )}
 
       {/* Right Floating Map Controls */}
-      <nav aria-label="地図操作コントロール" className="absolute right-3 bottom-10 sm:right-4 sm:bottom-12 z-30">
+      <nav
+        ref={controlsNavRef}
+        aria-label="地図操作コントロール"
+        className="absolute right-3 bottom-10 sm:right-4 sm:bottom-12 z-30"
+      >
         <MapControls
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}

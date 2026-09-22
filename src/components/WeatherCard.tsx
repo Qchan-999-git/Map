@@ -14,6 +14,7 @@ import { RouteWeather, WeatherCategory, WeatherCondition } from '../types';
 
 interface WeatherCardProps {
   weather: RouteWeather | null | undefined;
+  routeRain?: boolean | null;
 }
 
 function WeatherIcon({ condition }: { condition: WeatherCondition }) {
@@ -82,7 +83,7 @@ function PointColumn({ point }: { point: WeatherCondition }) {
 }
 
 /** 出発地・途中・目的地の天気を横並び表示する。悪天候時は注意文を表示。 */
-export const WeatherCard: React.FC<WeatherCardProps> = ({ weather }) => {
+export const WeatherCard: React.FC<WeatherCardProps> = ({ weather, routeRain }) => {
   if (weather === undefined) return null;
 
   if (weather === null || weather.error) {
@@ -130,6 +131,13 @@ export const WeatherCard: React.FC<WeatherCardProps> = ({ weather }) => {
               <span>{c}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {routeRain === true && (
+        <div className="mt-2 flex items-start gap-1.5 text-[11px] text-sky-900 bg-sky-100/80 border border-sky-200/70 rounded-lg px-2 py-1.5 leading-snug">
+          <CloudRain size={13} className="text-sky-700 flex-shrink-0 mt-px" />
+          <span>雨雲レーダーでルート上に雨の区間が見られます（傘・雨具のご準備を）</span>
         </div>
       )}
     </div>
