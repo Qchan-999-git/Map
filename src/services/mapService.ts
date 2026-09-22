@@ -4,6 +4,7 @@ import { VEHICLE_PROFILES } from '../data/vehicleProfiles';
 import { analyzeNarrowRoads, verifyNarrowRoads } from './narrowRoad';
 import { analyzeElevated } from './elevated';
 import { getRouteWeather, WEATHER_STRESS_SCORE_ADD } from './weather';
+import { analyzeTraffic, TRAFFIC_STRESS_SCORE_ADD } from './traffic';
 
 /**
  * Calculates distance between two LatLng points using the Haversine formula (in meters).
@@ -284,7 +285,9 @@ async function applyWeather(
     const weather = await getRouteWeather(result.coordinates, elevatedSpan);
     if (!weather) return;
     result.weather = weather;
-    result.estimatedDuration = Math.round(result.totalDuration * weather.durationFactor);
+    // 混雑補正（congestion.adjustedDuration）と天候補正を合わせた推定所要時間
+    const baseDuration = result.congestion?.adjustedDuration ?? result.totalDuration;
+    result.estimatedDuration = Math.round(baseDuration * weather.durationFactor);
     if (weather.cautions.length > 0) {
       result.cautions = [...(result.cautions ?? []), ...weather.cautions];
     }
@@ -299,6 +302,19 @@ async function applyWeather(
   } catch (err) {
     console.warn('Weather integration skipped:', err);
   }
+}
+
+/**
+ * 混雑情報を結果へ反映する（driving のみ）。
+ * stressScore への加点は候補ごとの評価時に実施済みのため、
+ * ここでは天候が未適用のケースに備えて estimatedDuration を更新するだけにする。
+ */
+function applyTrafficToResult(result: RouteResult): void {
+  const congestion = result.congestion;
+  if (!congestion) return;
+  result.estimatedDuration = result.weather
+    ? Math.round(congestion.adjustedDuration * result.weather.durationFactor)
+    : congestion.adjustedDuration;
 }
 
 // ルート再計算時に前回の Overpass 検証を中断するためのコントローラ
@@ -331,6 +347,8 @@ export async function calculateRoute(
   const resultVehicleType = mode === 'driving' ? vehicleType : undefined;
   const avoidNarrowRoads = options?.avoidNarrowRoads ?? false;
   const narrowRoadThreshold = options?.narrowRoadThreshold ?? 4.0;
+  const useTraffic = mode === 'driving' && options?.includeTraffic === true;
+  const analysisTime = new Date(); // 混雑推定はルート計算時点を基準にする
   // 上級者モードも含め、複数案を取得（fastest / 低ストレス の比較に使う）
   const wantAlternatives =
     mode === 'driving' &&
@@ -386,23 +404,48 @@ export async function calculateRoute(
         };
       });
 
-      const scored = candidates.map((c) => {
+      const scored: Array<{
+        result: RouteResult;
+        stressScore: number;
+        rightTurnCount: number;
+        leftTurnCount: number;
+      }> = [];
+      for (const c of candidates) {
         if (avoidNarrowRoads) {
           c.narrowRoadAnalysis = analyzeNarrowRoads(c.steps, narrowRoadThreshold);
           applyNarrowLevels(c.steps, c.narrowRoadAnalysis);
         }
-        return {
-          result: c,
-          ...scoreRoute(c, driverProfile),
-        };
-      });
+        const base = scoreRoute(c, driverProfile);
+        let stressScore = base.stressScore;
+        if (useTraffic) {
+          const congestion = await analyzeTraffic(c, analysisTime);
+          c.congestion = congestion;
+          // 初心者・高齢者・ゆとりでは heavy 区間に応じて stress 加点（ルート選択に反映）
+          const isStressProfile =
+            driverProfile === 'beginner' ||
+            driverProfile === 'elderly' ||
+            driverProfile === 'yutori';
+          if (congestion && isStressProfile) {
+            const heavyCount = congestion.segments.filter((s) => s.level === 'heavy').length;
+            if (heavyCount > 0) {
+              stressScore =
+                Math.round((stressScore + TRAFFIC_STRESS_SCORE_ADD * heavyCount) * 10) / 10;
+            }
+          }
+        }
+        scored.push({ result: c, stressScore, rightTurnCount: base.rightTurnCount, leftTurnCount: base.leftTurnCount });
+      }
 
-      // 上級者: 推定所要時間が最小の案。standard: 先頭（最速）案。それ以外: 低ストレス順.
+      // 上級者: 混雑補正後の推定所要時間が最小の案。standard: 先頭（最速）案。それ以外: 低ストレス順.
       const preferLowStress =
         (driverProfile !== 'standard' && driverProfile !== 'expert') || avoidNarrowRoads;
       const preferFastest = driverProfile === 'expert';
       const best = preferFastest
-        ? [...scored].sort((a, b) => a.result.totalDuration - b.result.totalDuration)[0]
+        ? [...scored].sort(
+            (a, b) =>
+              (a.result.congestion?.adjustedDuration ?? a.result.totalDuration) -
+              (b.result.congestion?.adjustedDuration ?? b.result.totalDuration)
+          )[0]
         : preferLowStress
           ? [...scored].sort((a, b) => a.stressScore - b.stressScore)[0]
           : scored[0];
@@ -451,6 +494,8 @@ export async function calculateRoute(
         }
       }
 
+      if (useTraffic && result.congestion) applyTrafficToResult(result);
+
       if (options?.includeWeather) await applyWeather(result, driverProfile);
 
       return result;
@@ -490,6 +535,20 @@ export async function calculateRoute(
   };
   if (avoidNarrowRoads) {
     fallback.narrowRoadAnalysis = analyzeNarrowRoads(fallback.steps, narrowRoadThreshold);
+  }
+  if (useTraffic) {
+    const congestion = await analyzeTraffic(fallback, analysisTime);
+    if (congestion) {
+      fallback.congestion = congestion;
+      fallback.estimatedDuration = congestion.adjustedDuration;
+      const isStressProfile =
+        driverProfile === 'beginner' || driverProfile === 'elderly' || driverProfile === 'yutori';
+      const heavyCount = congestion.segments.filter((s) => s.level === 'heavy').length;
+      if (isStressProfile && heavyCount > 0) {
+        fallback.stressScore =
+          Math.round((fallback.stressScore + TRAFFIC_STRESS_SCORE_ADD * heavyCount) * 10) / 10;
+      }
+    }
   }
   if (options?.includeWeather) await applyWeather(fallback, driverProfile);
   return fallback;

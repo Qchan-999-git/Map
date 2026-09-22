@@ -9,6 +9,7 @@ import { ShutoMergeAssist } from './ShutoMergeAssist';
 import { ElevatedBadge } from './ElevatedBadge';
 import { TimeRestrictionCard } from './TimeRestrictionCard';
 import { WeatherCard } from './WeatherCard';
+import { CongestionCard } from './CongestionCard';
 import { NarrowRoadCard } from './NarrowRoadCard';
 import { checkTimeRestrictions } from '../services/timeRestriction';
 import { DriveModeCard } from './DriveModeCard';
@@ -806,6 +807,9 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 
         {/* Weather info (driving only; fetch failure is display-only) */}
         {mode === 'driving' && <WeatherCard weather={routeResult?.weather} />}
+
+        {/* Congestion info (driving only; estimated from time-of-day) */}
+        {mode === 'driving' && <CongestionCard congestion={routeResult?.congestion} />}
 
         {routeResult ? (
           <>

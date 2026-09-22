@@ -153,6 +153,27 @@ export interface RouteResult {
   alternatives?: RouteResult[];
   narrowRoadAnalysis?: NarrowRoadAnalysis;
   weather?: RouteWeather | null; // null = 取得失敗（表示のみ）
+  congestion?: CongestionAnalysis | null; // null = 混雑情報なし（表示のみ）
+}
+
+/** 区間ごとの混雑度 */
+export type CongestionLevel = 'smooth' | 'moderate' | 'heavy';
+
+/** 混雑区間の概要 */
+export interface CongestionSegment {
+  stepIndex: number;
+  name: string;
+  distance: number; // meters
+  level: CongestionLevel;
+}
+
+/** ルート全体の混雑解析結果 */
+export interface CongestionAnalysis {
+  segments: CongestionSegment[];
+  congestionFactor: number; // 混雑補正係数（>=1.0）
+  adjustedDuration: number; // 混雑補正後の所要時間（seconds）
+  estimated: boolean; // 推定値（時間帯からの推定）かどうか
+  provider: string; // 使用したプロバイダ名
 }
 
 export interface ClickedLocationInfo {

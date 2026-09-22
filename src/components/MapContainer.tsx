@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
-import { ClickedLocationInfo, GeoPoint, MapLayerConfig, ParkingSpot, RouteResult, RouteStep, SavedSpot } from '../types';
+import { ClickedLocationInfo, GeoPoint, MapLayerConfig, ParkingSpot, RouteResult, RouteStep, SavedSpot, CongestionLevel } from '../types';
 import { CATEGORY_INFO } from '../data/mapLayers';
 
 interface MapContainerProps {
@@ -77,6 +77,40 @@ function nearestCoordIndex(
     }
   });
   return best;
+}
+
+const CONGESTION_COLOR: Record<CongestionLevel, string> = {
+  smooth: '#10b981',
+  moderate: '#f59e0b',
+  heavy: '#ef4444',
+};
+
+const CONGESTION_LABEL: Record<CongestionLevel, string> = {
+  smooth: '順調',
+  moderate: 'やや混雑',
+  heavy: '混雑',
+};
+
+/**
+ * 混雑解析済みの区間（congestion.segments）をルートポリライン座標の区間へ分解する。
+ * 狭路と同じくステップの maneuver 地点を区切りの目安に使う。
+ */
+function buildCongestionSections(
+  coordinates: [number, number][],
+  sections: { stepIndex: number; name: string; level: CongestionLevel }[]
+): { stepIndex: number; name: string; level: CongestionLevel; points: [number, number][] }[] {
+  return sections
+    .map((sec) => {
+      const st = sec.stepIndex;
+      const endLoc = st === 0 ? coordinates[0] : coordinates[st];
+      const startLoc = st === 0 ? coordinates[0] : coordinates[st - 1];
+      const startIdx = nearestCoordIndex(coordinates, startLoc);
+      const endIdx = nearestCoordIndex(coordinates, endLoc);
+      const points = coordinates.slice(Math.min(startIdx, endIdx), Math.max(startIdx, endIdx) + 1);
+      if (points.length < 2) return null;
+      return { stepIndex: st, name: sec.name, level: sec.level, points };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
 }
 
 export const MapContainer: React.FC<MapContainerProps> = ({
@@ -460,6 +494,26 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       lineJoin: 'round',
     });
     layer.addLayer(mainPolyline);
+
+    // Congestion segments overlay (driving, drawn right after main line,
+    // before merge pins / narrow highlights)
+    if (routeResult.congestion && routeResult.congestion.segments.length > 0) {
+      const congSections = buildCongestionSections(
+        routeResult.coordinates,
+        routeResult.congestion.segments
+      );
+      congSections.forEach((sec) => {
+        const line = L.polyline(sec.points, {
+          color: CONGESTION_COLOR[sec.level],
+          weight: 7,
+          opacity: 0.85,
+          lineCap: 'round',
+          lineJoin: 'round',
+        });
+        line.bindTooltip(`${sec.name}（${CONGESTION_LABEL[sec.level]}）`, { direction: 'top' });
+        layer.addLayer(line);
+      });
+    }
 
     // Start Point Pin (Green)
     if (routeStart) {
