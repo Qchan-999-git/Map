@@ -607,7 +607,7 @@ export default function App() {
 
       {/* Floating Spot Detail Card (Bottom left / bottom center) */}
       {clickedLocation && !isMeasuring && !isDriving && (
-        <div className="absolute bottom-10 left-3 sm:left-4 z-30 pointer-events-auto max-w-sm w-[calc(100%-1.5rem)] sm:w-96">
+        <div className="absolute bottom-10 left-3 sm:left-4 z-50 pointer-events-auto max-w-sm w-[calc(100%-1.5rem)] sm:w-96">
           <SpotDetailCard
             location={clickedLocation}
             existingSpot={selectedSpot}
@@ -617,11 +617,15 @@ export default function App() {
             }}
             onSetStart={(pt) => {
               setRouteStart(pt);
+              setClickedLocation(null);
+              setSelectedSpot(null);
               setActivePanel('route');
               if (routeEnd) handleCalculateRoute();
             }}
             onSetEnd={(pt) => {
               setRouteEnd(pt);
+              setClickedLocation(null);
+              setSelectedSpot(null);
               setActivePanel('route');
               if (routeStart) handleCalculateRoute();
             }}
