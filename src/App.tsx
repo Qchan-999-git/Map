@@ -38,7 +38,7 @@ const AVOID_NARROW_STORAGE_KEY = 'navi_avoid_narrow_roads';
 const NARROW_THRESHOLD_STORAGE_KEY = 'navi_narrow_road_threshold';
 const WEATHER_VISIBLE_STORAGE_KEY = 'navi_show_weather';
 const TRAFFIC_VISIBLE_STORAGE_KEY = 'navi_show_traffic';
-const RAIN_VISIBLE_STORAGE_KEY = 'navi_show_rain';
+const RAIN_VISIBLE_STORAGE_KEY = 'navi_show_rain_v2'; // 既定 OFF 化に伴い旧キー navi_show_rain から変更
 
 /** サイドパネルの幅（px）。ヘッダー・fitBounds のオフセットに使用 */
 const PANEL_WIDTH_PX = 420;
@@ -162,9 +162,9 @@ export default function App() {
     readBooleanSetting(TRAFFIC_VISIBLE_STORAGE_KEY, true)
   );
 
-  // 雨雲レーダー表示（localStorage 永続化・localStorage 保存は既定 ON）
+  // 雨雲レーダー表示（localStorage 永続化・紹介用のお試し機能なので既定 OFF）
   const [showRain, setShowRain] = useState<boolean>(() =>
-    readBooleanSetting(RAIN_VISIBLE_STORAGE_KEY, true)
+    readBooleanSetting(RAIN_VISIBLE_STORAGE_KEY, false)
   );
   const [rainForceSim] = useState<boolean>(() => {
     try {
@@ -229,6 +229,11 @@ export default function App() {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setToastMessage({ text, type });
     toastTimeoutRef.current = setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleToggleRain = () => {
+    setShowRain((v) => !v);
+    showToast(!showRain ? '雨雲レーダーを表示します' : '雨雲レーダーを非表示にしました', 'info');
   };
 
   // Persist saved spots to localStorage
@@ -650,13 +655,7 @@ export default function App() {
               showToast(`「${l.name}」に切り替えました`, 'info');
             }}
             showRain={showRain}
-            onToggleRain={() => {
-              setShowRain((v) => !v);
-              showToast(
-                !showRain ? '雨雲レーダーを表示します' : '雨雲レーダーを非表示にしました',
-                'info'
-              );
-            }}
+            onToggleRain={handleToggleRain}
           />
         </div>
       </header>
@@ -716,6 +715,8 @@ export default function App() {
               onToggleWeather={() => setShowWeather((v) => !v)}
               showTraffic={showTraffic}
               onToggleTraffic={() => setShowTraffic((v) => !v)}
+              showRain={showRain}
+              onToggleRain={handleToggleRain}
               routeRain={routeRain}
               collapsed={panelCollapsed}
               onCollapse={() => setPanelCollapsed(true)}

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, ParkingCircle, Wallet, Layers, CircleAlert, Cloud, CarFront, Settings2, ChevronDown, ChevronUp, PanelLeftClose, ChevronsRight } from 'lucide-react';
+import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, ParkingCircle, Wallet, Layers, CircleAlert, Cloud, CloudRain, CarFront, Settings2, ChevronDown, ChevronUp, PanelLeftClose, ChevronsRight } from 'lucide-react';
 import { DriverProfile, GeoPoint, ParkingSpot, RouteResult, TravelMode, VehicleDifficulty, VehicleType } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
 import { VEHICLE_ICONS, VEHICLE_PROFILE_LIST, VEHICLE_PROFILES } from '../data/vehicleProfiles';
@@ -59,6 +59,8 @@ interface RoutePanelProps {
   onToggleWeather: () => void;
   showTraffic: boolean;
   onToggleTraffic: () => void;
+  showRain: boolean;
+  onToggleRain: () => void;
   routeRain: boolean | null;
   collapsed?: boolean;
   onCollapse: () => void;
@@ -153,6 +155,8 @@ interface AdvancedSettingsAccordionProps {
   onToggleWeather: () => void;
   showTraffic: boolean;
   onToggleTraffic: () => void;
+  showRain: boolean;
+  onToggleRain: () => void;
 }
 
 /** ④ 詳細設定（狭い道・表示情報・車種）のアコーディオン。閉時は現在の設定を1行で要約表示する。 */
@@ -169,6 +173,8 @@ const AdvancedSettingsAccordion: React.FC<AdvancedSettingsAccordionProps> = ({
   onToggleWeather,
   showTraffic,
   onToggleTraffic,
+  showRain,
+  onToggleRain,
 }) => {
   const [open, setOpen] = useState(false);
   const profileLabel =
@@ -318,7 +324,7 @@ const AdvancedSettingsAccordion: React.FC<AdvancedSettingsAccordionProps> = ({
             )}
           </div>
 
-          {/* 表示情報（気象・混雑）の ON/OFF */}
+          {/* 表示情報（気象・混雑・雨雲レーダー）の ON/OFF */}
           <div className="rounded-xl border border-neutral-200 bg-white p-3 space-y-2.5">
             <div className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
               表示情報
@@ -380,6 +386,35 @@ const AdvancedSettingsAccordion: React.FC<AdvancedSettingsAccordionProps> = ({
                 />
               </button>
             </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <CloudRain size={13} className="text-sky-600" />
+                <span className="text-xs font-bold text-neutral-700">雨雲レーダー</span>
+                <span className="text-[10px] text-neutral-400 hidden sm:inline">
+                  地図に雨雲を重ねる（お試し機能）
+                </span>
+              </div>
+              <button
+                id="toggle-show-rain"
+                role="switch"
+                aria-checked={showRain}
+                onClick={() => {
+                  onToggleRain();
+                }}
+                className={`relative w-10 h-5.5 rounded-full transition-colors duration-200 flex-shrink-0 ${
+                  showRain ? 'bg-sky-600' : 'bg-neutral-300'
+                }`}
+                style={{ height: 22 }}
+              >
+                <span
+                  className={`absolute top-0.5 w-4.5 h-4.5 rounded-full bg-white shadow transition-all duration-200 ${
+                    showRain ? 'left-[19px]' : 'left-0.5'
+                  }`}
+                  style={{ width: 18, height: 18, top: 2 }}
+                />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -420,6 +455,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   onToggleWeather,
   showTraffic,
   onToggleTraffic,
+  showRain,
+  onToggleRain,
   routeRain,
   collapsed = false,
   onCollapse,
@@ -1118,6 +1155,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
               onToggleWeather={onToggleWeather}
               showTraffic={showTraffic}
               onToggleTraffic={onToggleTraffic}
+              showRain={showRain}
+              onToggleRain={onToggleRain}
             />
           </div>
         </>
