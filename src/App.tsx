@@ -38,7 +38,7 @@ const AVOID_NARROW_STORAGE_KEY = 'navi_avoid_narrow_roads';
 const NARROW_THRESHOLD_STORAGE_KEY = 'navi_narrow_road_threshold';
 const WEATHER_VISIBLE_STORAGE_KEY = 'navi_show_weather';
 const TRAFFIC_VISIBLE_STORAGE_KEY = 'navi_show_traffic';
-const RAIN_VISIBLE_STORAGE_KEY = 'navi_show_rain';
+const RAIN_VISIBLE_STORAGE_KEY = 'navi_show_rain_v2'; // 既定 OFF 化に伴い旧キー navi_show_rain から変更
 
 /** サイドパネルの幅（px）。ヘッダー・fitBounds のオフセットに使用 */
 const PANEL_WIDTH_PX = 420;
@@ -162,9 +162,9 @@ export default function App() {
     readBooleanSetting(TRAFFIC_VISIBLE_STORAGE_KEY, true)
   );
 
-  // 雨雲レーダー表示（localStorage 永続化・localStorage 保存は既定 ON）
+  // 雨雲レーダー表示（localStorage 永続化・紹介用のお試し機能なので既定 OFF）
   const [showRain, setShowRain] = useState<boolean>(() =>
-    readBooleanSetting(RAIN_VISIBLE_STORAGE_KEY, true)
+    readBooleanSetting(RAIN_VISIBLE_STORAGE_KEY, false)
   );
   const [rainForceSim] = useState<boolean>(() => {
     try {
@@ -176,16 +176,23 @@ export default function App() {
   const [rainSource, setRainSource] = useState<RainSource | null>(null);
   const [routeRain, setRouteRain] = useState<boolean | null>(null);
 
-  // MapControls の高さを計測し、雨雲UIなどの配置をその上に積む（CSS 変数経由）
+  // MapControls の位置を計測し、雨雲UIをボタン群の左隣（下端揃え）に置く（CSS 変数経由）
   const controlsNavRef = useRef<HTMLElement | null>(null);
-  const [controlsHeight, setControlsHeight] = useState(0);
+  const [controlsBox, setControlsBox] = useState({ right: 0, bottom: 0 });
   useEffect(() => {
     const node = controlsNavRef.current;
-    if (!node) return;
-    const update = () => setControlsHeight(node.getBoundingClientRect().height);
+    const parent = node?.offsetParent;
+    if (!node || !parent) return;
+    const update = () => {
+      const r = node.getBoundingClientRect();
+      const p = parent.getBoundingClientRect();
+      // right: 親の右端からボタン群の左端までの距離 / bottom: 親の下端からボタン群の下端までの距離
+      setControlsBox({ right: p.right - r.left, bottom: p.bottom - r.bottom });
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(node);
+    ro.observe(parent);
     return () => ro.disconnect();
   }, [activePanel]);
   const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
@@ -229,6 +236,11 @@ export default function App() {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setToastMessage({ text, type });
     toastTimeoutRef.current = setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleToggleRain = () => {
+    setShowRain((v) => !v);
+    showToast(!showRain ? '雨雲レーダーを表示します' : '雨雲レーダーを非表示にしました', 'info');
   };
 
   // Persist saved spots to localStorage
@@ -590,7 +602,12 @@ export default function App() {
   return (
     <main
       className="relative w-screen h-screen overflow-hidden bg-neutral-900 font-sans"
-      style={{ ['--map-controls-h']: `${controlsHeight}px` } as CSSProperties}
+      style={
+        {
+          ['--map-controls-right']: `${controlsBox.right}px`,
+          ['--map-controls-bottom']: `${controlsBox.bottom}px`,
+        } as CSSProperties
+      }
     >
       {/* Fullscreen Map Layer */}
       <MapContainer
@@ -650,13 +667,7 @@ export default function App() {
               showToast(`「${l.name}」に切り替えました`, 'info');
             }}
             showRain={showRain}
-            onToggleRain={() => {
-              setShowRain((v) => !v);
-              showToast(
-                !showRain ? '雨雲レーダーを表示します' : '雨雲レーダーを非表示にしました',
-                'info'
-              );
-            }}
+            onToggleRain={handleToggleRain}
           />
         </div>
       </header>
@@ -716,6 +727,8 @@ export default function App() {
               onToggleWeather={() => setShowWeather((v) => !v)}
               showTraffic={showTraffic}
               onToggleTraffic={() => setShowTraffic((v) => !v)}
+              showRain={showRain}
+              onToggleRain={handleToggleRain}
               routeRain={routeRain}
               collapsed={panelCollapsed}
               onCollapse={() => setPanelCollapsed(true)}
@@ -822,6 +835,8 @@ export default function App() {
           onToggleSpots={() => {
             setActivePanel((prev) => (prev === 'spots' ? 'none' : 'spots'));
           }}
+          showRain={showRain}
+          onToggleRain={handleToggleRain}
           isMeasuring={isMeasuring}
           onToggleMeasure={() => {
             setIsMeasuring(!isMeasuring);
