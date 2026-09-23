@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, ParkingCircle, Wallet, Layers, CircleAlert, Cloud, CloudRain, CarFront, Settings2, ChevronDown, ChevronUp, PanelLeftClose, ChevronsRight } from 'lucide-react';
-import { DriverProfile, GeoPoint, ParkingSpot, RouteResult, TravelMode, VehicleDifficulty, VehicleType } from '../types';
+import { DriverProfile, GeoPoint, ParkingSpot, RouteResult, RouteStep, TravelMode, VehicleDifficulty, VehicleType } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
 import { VEHICLE_ICONS, VEHICLE_PROFILE_LIST, VEHICLE_PROFILES } from '../data/vehicleProfiles';
 import { NARROW_THRESHOLD_BY_VEHICLE, getNarrowThresholdForVehicle } from '../services/narrowRoad';
@@ -158,6 +158,67 @@ interface AdvancedSettingsAccordionProps {
   showRain: boolean;
   onToggleRain: () => void;
 }
+
+/** 進行手順のアコーディオン。詳細設定と同じ開閉式で、初期状態は閉じている。 */
+const StepsAccordion: React.FC<{ steps: RouteStep[] }> = ({ steps }) => {
+  const [open, setOpen] = useState(false);
+  const totalDistance = steps.reduce((sum, s) => sum + s.distance, 0);
+
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
+      <button
+        id="route-steps-toggle"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 p-3 transition-colors hover:bg-neutral-50"
+        aria-expanded={open}
+      >
+        <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-700">
+          <CheckCircle2 size={14} className="text-blue-600" />
+          <span>進行手順</span>
+        </div>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] text-neutral-500 truncate">
+            {steps.length} 区間・{formatDistance(totalDistance)}
+          </span>
+          {open ? (
+            <ChevronUp size={14} className="text-neutral-400 flex-shrink-0" />
+          ) : (
+            <ChevronDown size={14} className="text-neutral-400 flex-shrink-0" />
+          )}
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-neutral-100 px-3 py-3 space-y-2">
+          {steps.map((step, idx) => (
+            <div
+              key={idx}
+              className="p-2.5 rounded-xl border border-neutral-100 hover:border-neutral-200 bg-neutral-50/50 flex items-start gap-2.5 transition-colors"
+            >
+              <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                {idx + 1}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-neutral-800">
+                  {step.instruction}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-neutral-400">
+                  <span>{formatDistance(step.distance)}</span>
+                  {step.name && (
+                    <>
+                      <span>•</span>
+                      <span className="truncate">{step.name}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 /** ④ 詳細設定（狭い道・表示情報・車種）のアコーディオン。閉時は現在の設定を1行で要約表示する。 */
 const AdvancedSettingsAccordion: React.FC<AdvancedSettingsAccordionProps> = ({
@@ -1092,40 +1153,8 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                   </div>
                 )}
 
-                {/* Directions List */}
-                <div>
-                  <div className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                    <CheckCircle2 size={14} className="text-blue-600" />
-                    <span>進行手順 ({routeResult.steps.length} 区間)</span>
-                  </div>
-
-                  <div className="space-y-2">
-                    {routeResult.steps.map((step, idx) => (
-                      <div
-                        key={idx}
-                        className="p-2.5 rounded-xl border border-neutral-100 hover:border-neutral-200 bg-neutral-50/50 flex items-start gap-2.5 transition-colors"
-                      >
-                        <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
-                          {idx + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium text-neutral-800">
-                            {step.instruction}
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-neutral-400">
-                            <span>{formatDistance(step.distance)}</span>
-                            {step.name && (
-                              <>
-                                <span>•</span>
-                                <span className="truncate">{step.name}</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                {/* Directions List（アコーディオン・初期は閉） */}
+                <StepsAccordion steps={routeResult.steps} />
               </>
             ) : (
               <div className="text-center py-10 px-4 text-neutral-400">
