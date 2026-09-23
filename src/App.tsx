@@ -176,16 +176,23 @@ export default function App() {
   const [rainSource, setRainSource] = useState<RainSource | null>(null);
   const [routeRain, setRouteRain] = useState<boolean | null>(null);
 
-  // MapControls の高さを計測し、雨雲UIなどの配置をその上に積む（CSS 変数経由）
+  // MapControls の位置を計測し、雨雲UIをボタン群の左隣（下端揃え）に置く（CSS 変数経由）
   const controlsNavRef = useRef<HTMLElement | null>(null);
-  const [controlsHeight, setControlsHeight] = useState(0);
+  const [controlsBox, setControlsBox] = useState({ right: 0, bottom: 0 });
   useEffect(() => {
     const node = controlsNavRef.current;
-    if (!node) return;
-    const update = () => setControlsHeight(node.getBoundingClientRect().height);
+    const parent = node?.offsetParent;
+    if (!node || !parent) return;
+    const update = () => {
+      const r = node.getBoundingClientRect();
+      const p = parent.getBoundingClientRect();
+      // right: 親の右端からボタン群の左端までの距離 / bottom: 親の下端からボタン群の下端までの距離
+      setControlsBox({ right: p.right - r.left, bottom: p.bottom - r.bottom });
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(node);
+    ro.observe(parent);
     return () => ro.disconnect();
   }, [activePanel]);
   const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
@@ -595,7 +602,12 @@ export default function App() {
   return (
     <main
       className="relative w-screen h-screen overflow-hidden bg-neutral-900 font-sans"
-      style={{ ['--map-controls-h']: `${controlsHeight}px` } as CSSProperties}
+      style={
+        {
+          ['--map-controls-right']: `${controlsBox.right}px`,
+          ['--map-controls-bottom']: `${controlsBox.bottom}px`,
+        } as CSSProperties
+      }
     >
       {/* Fullscreen Map Layer */}
       <MapContainer
@@ -823,6 +835,8 @@ export default function App() {
           onToggleSpots={() => {
             setActivePanel((prev) => (prev === 'spots' ? 'none' : 'spots'));
           }}
+          showRain={showRain}
+          onToggleRain={handleToggleRain}
           isMeasuring={isMeasuring}
           onToggleMeasure={() => {
             setIsMeasuring(!isMeasuring);

@@ -847,11 +847,14 @@ export const MapContainer: React.FC<MapContainerProps> = ({
   return (
     <div className="relative w-full h-full">
       <div id="leaflet-map" ref={mapContainerRef} className="w-full h-full z-0 bg-neutral-900" />
-      {/* 雨雲レーダーUI（MapControls の上側、--map-controls-h は App 側で計測・設定） */}
+      {/* 雨雲レーダーUI（MapControls の左隣・下端揃え。--map-controls-* は App 側で計測・設定） */}
       {showRain && (
         <div
-          className="absolute right-3 sm:right-4 z-20 pointer-events-none"
-          style={{ bottom: 'calc(var(--map-controls-h, 0px) + 1rem)' }}
+          className="absolute z-20 pointer-events-none"
+          style={{
+            right: 'calc(var(--map-controls-right, 4rem) + 0.5rem)',
+            bottom: 'var(--map-controls-bottom, 2.5rem)',
+          }}
         >
           <RainRadarPanel
             source={rainState?.source ?? null}

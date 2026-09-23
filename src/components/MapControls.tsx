@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Minus, Locate, Navigation, Bookmark, Ruler, Maximize2, Minimize2, Compass } from 'lucide-react';
+import { Plus, Minus, Locate, Navigation, Bookmark, Ruler, Maximize2, Minimize2, Compass, CloudRain } from 'lucide-react';
 
 interface MapControlsProps {
   onZoomIn: () => void;
@@ -10,6 +10,8 @@ interface MapControlsProps {
   activePanel: 'none' | 'route' | 'spots';
   onToggleRoute: () => void;
   onToggleSpots: () => void;
+  showRain: boolean;
+  onToggleRain: () => void;
   isMeasuring: boolean;
   onToggleMeasure: () => void;
   savedSpotsCount: number;
@@ -24,6 +26,8 @@ export const MapControls: React.FC<MapControlsProps> = ({
   activePanel,
   onToggleRoute,
   onToggleSpots,
+  showRain,
+  onToggleRain,
   isMeasuring,
   onToggleMeasure,
   savedSpotsCount,
@@ -89,6 +93,21 @@ export const MapControls: React.FC<MapControlsProps> = ({
           title="距離計測ツール"
         >
           <Ruler size={18} />
+        </button>
+
+        {/* Rain Radar Toggle */}
+        <button
+          id="toggle-rain-radar-btn"
+          onClick={onToggleRain}
+          aria-pressed={showRain}
+          className={`p-2.5 rounded-xl transition-all flex items-center justify-center ${
+            showRain
+              ? 'bg-sky-600 text-white shadow-sm'
+              : 'text-neutral-700 hover:bg-neutral-100'
+          }`}
+          title={showRain ? '雨雲レーダーを非表示' : '雨雲レーダーを表示'}
+        >
+          <CloudRain size={18} />
         </button>
       </div>
 
