@@ -13,6 +13,7 @@ import { CongestionCard } from './CongestionCard';
 import { NarrowRoadCard } from './NarrowRoadCard';
 import { checkTimeRestrictions } from '../services/timeRestriction';
 import { DriveOverlay } from './DriveOverlay';
+import { RoutePointInput } from './RoutePointInput';
 import { buildLaneAdvices, speakAdvice } from '../services/laneGuidance';
 import { useAutoLaneSpeech } from '../hooks/useAutoLaneSpeech';
 import { findMerges } from '../services/shutoAssist';
@@ -781,50 +782,26 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
         <>
           {/* ① 出発地・目的地・検索 */}
           <div className="p-4 space-y-3 border-b border-neutral-100">
-            {/* Start & End Inputs */}
+            {/* Start & End Inputs（直接入力 + 候補選択。地図クリックは補助） */}
             <div className="relative flex items-center gap-2">
               <div className="flex-1 space-y-2">
-                {/* Start Point */}
-                <div className="flex items-center gap-2 bg-neutral-50 px-3 py-2 rounded-xl border border-neutral-200">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[10px] text-neutral-400 font-semibold uppercase">出発地</div>
-                    <div className="text-xs font-medium truncate text-neutral-800">
-                      {routeStart ? pointLabel(routeStart) : (
-                        <span className="text-neutral-400 italic">地図上をクリック または 選択</span>
-                      )}
-                    </div>
-                  </div>
-                  {routeStart && (
-                    <button
-                      onClick={() => onSetStart(null)}
-                      className="text-neutral-400 hover:text-neutral-600 p-0.5"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
+                <RoutePointInput
+                  id="route-start-input"
+                  label="出発地"
+                  value={routeStart}
+                  dotClassName="bg-emerald-500"
+                  onSelect={(pt) => onSetStart(pt)}
+                  onClear={() => onSetStart(null)}
+                />
 
-                {/* End Point */}
-                <div className="flex items-center gap-2 bg-neutral-50 px-3 py-2 rounded-xl border border-neutral-200">
-                  <div className="w-2.5 h-2.5 rounded-full bg-rose-500 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[10px] text-neutral-400 font-semibold uppercase">目的地</div>
-                    <div className="text-xs font-medium truncate text-neutral-800">
-                      {routeEnd ? pointLabel(routeEnd) : (
-                        <span className="text-neutral-400 italic">地図上をクリック または 選択</span>
-                      )}
-                    </div>
-                  </div>
-                  {routeEnd && (
-                    <button
-                      onClick={() => onSetEnd(null)}
-                      className="text-neutral-400 hover:text-neutral-600 p-0.5"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
+                <RoutePointInput
+                  id="route-end-input"
+                  label="目的地"
+                  value={routeEnd}
+                  dotClassName="bg-rose-500"
+                  onSelect={(pt) => onSetEnd(pt)}
+                  onClear={() => onSetEnd(null)}
+                />
               </div>
 
               {/* Swap Button */}

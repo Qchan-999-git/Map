@@ -712,12 +712,14 @@ export default function App() {
               onChangeNarrowRoadThreshold={setNarrowRoadThreshold}
               onSetStart={(pt) => {
                 setRouteStart(pt);
+                if (pt) setFocusPoint({ lat: pt.lat, lng: pt.lng, name: pt.name });
                 if (pt && routeEnd) {
                   handleCalculateRoute(undefined, undefined, undefined, { start: pt, end: routeEnd });
                 }
               }}
               onSetEnd={(pt) => {
                 setRouteEnd(pt);
+                if (pt) setFocusPoint({ lat: pt.lat, lng: pt.lng, name: pt.name });
                 if (routeStart && pt) {
                   handleCalculateRoute(undefined, undefined, undefined, { start: routeStart, end: pt });
                 }
