@@ -34,7 +34,7 @@ export const LayerSelector: React.FC<LayerSelectorProps> = ({
       <button
         id="layer-selector-toggle-btn"
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl shadow-lg border backdrop-blur-md transition-all ${
+        className={`flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-xl shadow-lg border backdrop-blur-md transition-all ${
           isOpen
             ? 'bg-blue-600 text-white border-blue-600'
             : 'bg-white/90 text-neutral-800 border-neutral-200/80 hover:bg-white'
