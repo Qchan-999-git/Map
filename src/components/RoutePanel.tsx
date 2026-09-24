@@ -11,6 +11,7 @@ import { TimeRestrictionCard } from './TimeRestrictionCard';
 import { WeatherCard } from './WeatherCard';
 import { CongestionCard } from './CongestionCard';
 import { NarrowRoadCard } from './NarrowRoadCard';
+import { AccidentCard } from './AccidentCard';
 import { checkTimeRestrictions } from '../services/timeRestriction';
 import { DriveOverlay } from './DriveOverlay';
 import { RoutePointInput } from './RoutePointInput';
@@ -63,6 +64,10 @@ interface RoutePanelProps {
   showRain: boolean;
   onToggleRain: () => void;
   routeRain: boolean | null;
+  simulateAccident: boolean;
+  onToggleSimulateAccident: () => void;
+  accidentReportCount: number;
+  onClearAccidentReports: () => void;
   collapsed?: boolean;
   onCollapse: () => void;
   onExpand: () => void;
@@ -573,6 +578,10 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   showRain,
   onToggleRain,
   routeRain,
+  simulateAccident,
+  onToggleSimulateAccident,
+  accidentReportCount,
+  onClearAccidentReports,
   collapsed = false,
   onCollapse,
   onExpand,
@@ -1068,6 +1077,17 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
 
             {/* Congestion info (driving only; estimated from time-of-day) */}
             {mode === 'driving' && <CongestionCard congestion={routeResult?.congestion} />}
+
+            {/* Accident warnings (driving only; reports + simulation + heuristics) */}
+            {mode === 'driving' && (
+              <AccidentCard
+                accidents={routeResult?.accidents}
+                simulated={simulateAccident}
+                onToggleSimulate={onToggleSimulateAccident}
+                reportCount={accidentReportCount}
+                onClearReports={onClearAccidentReports}
+              />
+            )}
 
             {routeResult ? (
               <>
