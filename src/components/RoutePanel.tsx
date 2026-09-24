@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, ParkingCircle, Wallet, Layers, CircleAlert, Cloud, CloudRain, CarFront, Settings2, ChevronDown, ChevronUp, PanelLeftClose, ChevronsRight } from 'lucide-react';
+import { Navigation, Car, Footprints, Bike, ArrowUpDown, X, MapPin, Loader2, CheckCircle2, ShieldCheck, AlertTriangle, ParkingCircle, Wallet, Layers, CircleAlert, Cloud, CloudRain, CarFront, Settings2, ChevronDown, ChevronUp, PanelLeftClose, ChevronsRight, ArrowRight, Pencil } from 'lucide-react';
 import { DriverProfile, GeoPoint, ParkingSpot, RouteResult, RouteStep, TravelMode, VehicleDifficulty, VehicleType } from '../types';
 import { DRIVER_PROFILES, getDriverProfileConfig } from '../data/driverProfiles';
 import { VEHICLE_ICONS, VEHICLE_PROFILE_LIST, VEHICLE_PROFILES } from '../data/vehicleProfiles';
@@ -12,7 +12,7 @@ import { WeatherCard } from './WeatherCard';
 import { CongestionCard } from './CongestionCard';
 import { NarrowRoadCard } from './NarrowRoadCard';
 import { checkTimeRestrictions } from '../services/timeRestriction';
-import { DriveModeCard } from './DriveModeCard';
+import { DriveOverlay } from './DriveOverlay';
 import { buildLaneAdvices, speakAdvice } from '../services/laneGuidance';
 import { useAutoLaneSpeech } from '../hooks/useAutoLaneSpeech';
 import { findMerges } from '../services/shutoAssist';
@@ -142,6 +142,59 @@ const FastestVsNext: React.FC<{ alternatives: RouteResult[]; bestDuration: numbe
   );
 };
 
+function pointLabel(point: GeoPoint): string {
+  return point.name || point.address || `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
+}
+
+const TRAVEL_MODE_LABELS: Record<TravelMode, string> = {
+  driving: '自動車',
+  walking: '徒歩',
+  cycling: '自転車',
+};
+
+/** ルート検索後に入力フォームの代わりに表示する要約カード */
+const RouteSummaryCard: React.FC<{
+  routeStart: GeoPoint | null;
+  routeEnd: GeoPoint | null;
+  routeResult: RouteResult;
+  isLoading: boolean;
+  onEdit: () => void;
+}> = ({ routeStart, routeEnd, routeResult, isLoading, onEdit }) => (
+  <div className="p-4 border-b border-neutral-100">
+    <div className="rounded-2xl border border-blue-100/90 bg-blue-50/60 p-3 flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-neutral-800 min-w-0">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+          <span className="truncate">{routeStart ? pointLabel(routeStart) : '出発地'}</span>
+          <ArrowRight size={12} className="text-neutral-400 flex-shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" />
+          <span className="truncate">{routeEnd ? pointLabel(routeEnd) : '目的地'}</span>
+        </div>
+        <div className="mt-1 flex items-baseline gap-2 min-w-0">
+          <span className="text-lg font-extrabold text-neutral-900 whitespace-nowrap">
+            {formatDuration(routeResult.estimatedDuration ?? routeResult.totalDuration)}
+          </span>
+          <span className="text-xs font-semibold text-neutral-600 whitespace-nowrap">
+            {formatDistance(routeResult.totalDistance)}
+          </span>
+          <span className="text-[11px] text-neutral-400 truncate">
+            {TRAVEL_MODE_LABELS[routeResult.mode]}
+          </span>
+          {isLoading && <Loader2 size={13} className="animate-spin text-blue-600 self-center flex-shrink-0" />}
+        </div>
+      </div>
+      <button
+        id="edit-route-btn"
+        onClick={onEdit}
+        className="py-2 px-3 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 text-xs font-semibold flex items-center gap-1 flex-shrink-0 transition-colors"
+      >
+        <Pencil size={13} />
+        <span>編集</span>
+      </button>
+    </div>
+  </div>
+);
+
 interface AdvancedSettingsAccordionProps {
   mode: TravelMode;
   driverProfile: DriverProfile;
@@ -265,7 +318,7 @@ const AdvancedSettingsAccordion: React.FC<AdvancedSettingsAccordionProps> = ({
       </button>
 
       {open && (
-        <div className="border-t border-neutral-100 px-3 py-3 space-y-3.5 max-h-72 overflow-y-auto">
+        <div className="border-t border-neutral-100 px-3 py-3 space-y-3.5">
           {/* Vehicle Type Selector (車種＝運転特性ベース) */}
           {mode === 'driving' && (
             <div>
@@ -526,6 +579,13 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   const [mode, setMode] = useState<TravelMode>('driving');
   const [voiceOn, setVoiceOn] = useState(true);
   const [navMode, setNavMode] = useState<'plan' | 'drive'>('plan');
+  // ルートが出たら入力フォームを要約カードに折りたたむ（編集ボタンで再表示）
+  const hasRoute = routeResult !== null;
+  const [editing, setEditing] = useState(!hasRoute);
+  useEffect(() => {
+    setEditing(!hasRoute);
+  }, [hasRoute]);
+  const formCollapsed = hasRoute && !editing;
 
   const laneAdvices = useMemo(
     () => (routeResult ? buildLaneAdvices(routeResult.steps, driverProfile) : []),
@@ -681,7 +741,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
   return (
     <div className="flex flex-col h-full bg-white/95 backdrop-blur-md border-r border-neutral-200/90 shadow-2xl w-full text-neutral-800 z-40">
       {/* Header */}
-      <div className="p-4 border-b border-neutral-200/80 flex items-center justify-between bg-neutral-50/70">
+      <div className="flex-shrink-0 p-4 border-b border-neutral-200/80 flex items-center justify-between bg-neutral-50/70">
         <div className="flex items-center gap-2 font-bold text-base text-neutral-900">
           <Navigation size={20} className="text-blue-600" />
           <span>{isDriving ? '走行モード' : 'ルート案内・経路検索'}</span>
@@ -707,22 +767,16 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
         </div>
       </div>
 
-      {isDriving ? (
-        <div className="flex-1 flex min-h-0">
-          <DriveModeCard
-            advices={laneAdvices}
-            remaining={autoSpeech.remaining}
-            tracking={autoSpeech.tracking}
-            earlyMeters={earlyMeters}
-            liveLevel={liveLevel}
-            merges={merges}
-            junctions={junctions}
-            voiceOn={voiceOn}
-            onToggleVoice={() => setVoiceOn((v) => !v)}
-            onExitDrive={handleExitDrive}
-            trackError={autoSpeech.error}
-          />
-        </div>
+      {/* ヘッダー以外はまとめてスクロール */}
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+      {formCollapsed && routeResult ? (
+        <RouteSummaryCard
+          routeStart={routeStart}
+          routeEnd={routeEnd}
+          routeResult={routeResult}
+          isLoading={isLoading}
+          onEdit={() => setEditing(true)}
+        />
       ) : (
         <>
           {/* ① 出発地・目的地・検索 */}
@@ -736,7 +790,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="text-[10px] text-neutral-400 font-semibold uppercase">出発地</div>
                     <div className="text-xs font-medium truncate text-neutral-800">
-                      {routeStart ? routeStart.name || routeStart.address || `${routeStart.lat.toFixed(4)}, ${routeStart.lng.toFixed(4)}` : (
+                      {routeStart ? pointLabel(routeStart) : (
                         <span className="text-neutral-400 italic">地図上をクリック または 選択</span>
                       )}
                     </div>
@@ -757,7 +811,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="text-[10px] text-neutral-400 font-semibold uppercase">目的地</div>
                     <div className="text-xs font-medium truncate text-neutral-800">
-                      {routeEnd ? routeEnd.name || routeEnd.address || `${routeEnd.lat.toFixed(4)}, ${routeEnd.lng.toFixed(4)}` : (
+                      {routeEnd ? pointLabel(routeEnd) : (
                         <span className="text-neutral-400 italic">地図上をクリック または 選択</span>
                       )}
                     </div>
@@ -801,7 +855,10 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
               <button
                 id="compute-route-btn"
                 disabled={!routeStart || !routeEnd || isLoading}
-                onClick={() => onCalculateRoute(mode, vehicleType)}
+                onClick={() => {
+                  onCalculateRoute(mode, vehicleType);
+                  if (hasRoute) setEditing(false);
+                }}
                 className="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-neutral-200 disabled:text-neutral-400 text-white font-semibold text-xs shadow-md transition-all flex items-center justify-center gap-2"
               >
                 {isLoading ? (
@@ -898,10 +955,30 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                 {DRIVER_PROFILES.find((p) => p.id === driverProfile)?.description}
               </div>
             </div>
+
+            {/* ④ 詳細設定（アコーディオン） */}
+            <AdvancedSettingsAccordion
+              mode={mode}
+              driverProfile={driverProfile}
+              vehicleType={vehicleType}
+              onVehicleTypeChange={onVehicleTypeChange}
+              avoidNarrowRoads={avoidNarrowRoads}
+              narrowRoadThreshold={narrowRoadThreshold}
+              onChangeAvoidNarrowRoads={onChangeAvoidNarrowRoads}
+              onChangeNarrowRoadThreshold={onChangeNarrowRoadThreshold}
+              showWeather={showWeather}
+              onToggleWeather={onToggleWeather}
+              showTraffic={showTraffic}
+              onToggleTraffic={onToggleTraffic}
+              showRain={showRain}
+              onToggleRain={onToggleRain}
+            />
           </div>
+        </>
+      )}
 
           {/* ③ ルート結果 */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="p-4 space-y-4">
             {/* Parking guidance around destination */}
             {routeEnd && (
               <div className="rounded-2xl border border-purple-200 bg-purple-50/60 p-3">
@@ -1033,7 +1110,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                     remaining={autoSpeech.remaining}
                     voiceOn={voiceOn}
                     onToggleVoice={() => setVoiceOn((v) => !v)}
-                    onStartTracking={autoSpeech.start}
+                    onStartTracking={handleStartDrive}
                     onStopTracking={autoSpeech.stop}
                     trackError={autoSpeech.error}
                     compact={isExpert}
@@ -1071,7 +1148,7 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
                     className="w-full py-3 px-4 rounded-2xl bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 min-h-[44px]"
                   >
                     <Navigation size={16} />
-                    <span>走行開始（Next1件表示に切替）</span>
+                    <span>走行開始（地図上に案内を表示）</span>
                   </button>
                 )}
                 <div className="bg-gradient-to-br from-blue-50 to-indigo-50/50 p-4 rounded-2xl border border-blue-100/90 shadow-sm">
@@ -1168,27 +1245,25 @@ export const RoutePanel: React.FC<RoutePanelProps> = ({
               </div>
             )}
           </div>
+      </div>
 
-          {/* ④ 詳細設定（アコーディオン） */}
-          <div className="p-3 border-t border-neutral-100 bg-neutral-50/40">
-            <AdvancedSettingsAccordion
-              mode={mode}
-              driverProfile={driverProfile}
-              vehicleType={vehicleType}
-              onVehicleTypeChange={onVehicleTypeChange}
-              avoidNarrowRoads={avoidNarrowRoads}
-              narrowRoadThreshold={narrowRoadThreshold}
-              onChangeAvoidNarrowRoads={onChangeAvoidNarrowRoads}
-              onChangeNarrowRoadThreshold={onChangeNarrowRoadThreshold}
-              showWeather={showWeather}
-              onToggleWeather={onToggleWeather}
-              showTraffic={showTraffic}
-              onToggleTraffic={onToggleTraffic}
-              showRain={showRain}
-              onToggleRain={onToggleRain}
-            />
-          </div>
-        </>
+      {isDriving && routeResult && (
+        <DriveOverlay
+          advices={laneAdvices}
+          remaining={autoSpeech.remaining}
+          tracking={autoSpeech.tracking}
+          traveledMeters={autoSpeech.traveledMeters}
+          totalDistance={routeResult.totalDistance}
+          totalDuration={routeResult.estimatedDuration ?? routeResult.totalDuration}
+          earlyMeters={earlyMeters}
+          liveLevel={liveLevel}
+          merges={merges}
+          junctions={junctions}
+          voiceOn={voiceOn}
+          onToggleVoice={() => setVoiceOn((v) => !v)}
+          onExitDrive={handleExitDrive}
+          trackError={autoSpeech.error}
+        />
       )}
     </div>
   );
