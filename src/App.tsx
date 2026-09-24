@@ -39,6 +39,7 @@ const NARROW_THRESHOLD_STORAGE_KEY = 'navi_narrow_road_threshold';
 const WEATHER_VISIBLE_STORAGE_KEY = 'navi_show_weather';
 const TRAFFIC_VISIBLE_STORAGE_KEY = 'navi_show_traffic';
 const RAIN_VISIBLE_STORAGE_KEY = 'navi_show_rain_v2'; // 既定 OFF 化に伴い旧キー navi_show_rain から変更
+const PANEL_WIDTH_STORAGE_KEY = 'map_app_panel_width_v1';
 
 /** サイドパネルの幅（px）。ヘッダー・fitBounds のオフセットに使用 */
 const PANEL_WIDTH_PX = 420;
@@ -85,6 +86,23 @@ export default function App() {
   const [isDriving, setIsDriving] = useState(false);
   // ルートパネルの折りたたみ（地図を広く使う。デスクトップのみ）
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  // モバイルボトムシートの高さ（dvh）。ハンドルのタップで 40⇔76、ドラッグで 28〜92 の範囲で自由調整
+  // hidden は activePanel='none' と共有する
+  const [sheetHeightDvh, setSheetHeightDvh] = useState(40);
+  const [sheetDragging, setSheetDragging] = useState(false);
+  const sheetDrag = useRef<{ startY: number; startH: number; moved: boolean } | null>(null);
+  const sheetJustDragged = useRef(false);
+  // デスクトップサイドパネルの幅（px）。右端グリップのドラッグで 320〜640 の範囲で自由調整
+  const [panelWidthPx, setPanelWidthPx] = useState(() => {
+    try {
+      const n = parseInt(localStorage.getItem(PANEL_WIDTH_STORAGE_KEY) ?? '', 10);
+      if (!Number.isNaN(n)) return Math.min(640, Math.max(320, n));
+    } catch {
+      // ignore
+    }
+    return PANEL_WIDTH_PX;
+  });
+  const panelDrag = useRef<{ startX: number; startW: number; moved: boolean } | null>(null);
   const [isDesktop, setIsDesktop] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 640px)').matches : true
   );
@@ -96,17 +114,40 @@ export default function App() {
   }, []);
 
   // パネルを閉じたら折りたたみ状態も解除。ルートパネル以外では走行モードも解除
+  // パネルを開き直したらモバイルシートは 40dvh（地図が見える高さ）に戻す
   useEffect(() => {
     if (activePanel === 'none') setPanelCollapsed(false);
     if (activePanel !== 'route') setIsDriving(false);
+    if (activePanel !== 'none') setSheetHeightDvh(40);
   }, [activePanel]);
+
+  // モバイルシートの Esc 操作：広げていたら縮める → さらに Esc で閉じる
+  useEffect(() => {
+    if (activePanel === 'none' || isDriving || isDesktop) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (sheetHeightDvh > 58) setSheetHeightDvh(40);
+      else setActivePanel('none');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activePanel, isDriving, isDesktop, sheetHeightDvh]);
+
+  // デスクトップのパネル幅を永続化
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelWidthPx));
+    } catch {
+      // ignore
+    }
+  }, [panelWidthPx]);
 
   // パネル表示中はヘッダー・フッター・詳細カードをパネル幅ぶん右へずらす（デスクトップ）
   // 走行中はパネルを隠して地図上に案内を重ねるため、ずらさない
   const panelOpen = activePanel !== 'none' && !isDriving;
-  const offsetRight = panelOpen && !panelCollapsed && isDesktop ? PANEL_WIDTH_PX + 16 : 0;
+  const offsetRight = panelOpen && !panelCollapsed && isDesktop ? panelWidthPx + 16 : 0;
   const routeMapLeftOffset =
-    activePanel === 'route' && !panelCollapsed && !isDriving && isDesktop ? PANEL_WIDTH_PX : 0;
+    activePanel === 'route' && !panelCollapsed && !isDriving && isDesktop ? panelWidthPx : 0;
 
   // Route Planning State
   const [routeStart, setRouteStart] = useState<GeoPoint | null>(null);
@@ -196,7 +237,7 @@ export default function App() {
     ro.observe(node);
     ro.observe(parent);
     return () => ro.disconnect();
-  }, [activePanel, isDriving]);
+  }, [activePanel, isDriving, sheetHeightDvh, panelWidthPx]);
   const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
     try {
       const stored = localStorage.getItem(NARROW_THRESHOLD_STORAGE_KEY);
@@ -685,15 +726,92 @@ export default function App() {
         <aside
           aria-label="サイドパネル"
           className={`absolute left-0 bottom-0 z-40 ${isDriving ? 'hidden' : 'flex'} flex-col animate-in slide-in-from-bottom duration-300 sm:slide-in-from-left sm:duration-200 shadow-2xl ${
+            sheetDragging ? '' : 'transition-[height] duration-200'
+          } ${
             panelCollapsed && activePanel === 'route'
               ? 'w-full h-16 sm:w-14 sm:top-0 sm:h-full sm:rounded-none rounded-t-2xl'
-              : 'w-full h-[76vh] sm:top-0 sm:h-full sm:w-[420px] sm:rounded-none rounded-t-2xl'
+              : 'w-full sm:top-0 sm:h-full sm:rounded-none rounded-t-2xl'
           }`}
+          style={
+            panelCollapsed && activePanel === 'route'
+              ? undefined
+              : isDesktop
+                ? { width: panelWidthPx }
+                : { height: `${sheetHeightDvh}dvh` }
+          }
         >
-          {/* モバイル用のドラッグハンドル */}
-          <div className="sm:hidden flex justify-center pt-2 pb-1">
-            <div className="w-10 h-1 rounded-full bg-neutral-300" />
-          </div>
+          {/* モバイル用のドラッグハンドル（タップで大小切替、ドラッグで高さを自由調整） */}
+          <button
+            type="button"
+            aria-label={sheetHeightDvh > 58 ? 'シートを縮める' : 'シートを広げる'}
+            aria-expanded={sheetHeightDvh > 58}
+            onClick={() => {
+              // ドラッグ直後は click も発火するため、トグルしない
+              if (sheetJustDragged.current) {
+                sheetJustDragged.current = false;
+                return;
+              }
+              setSheetHeightDvh((h) => (h > 58 ? 40 : 76));
+            }}
+            onPointerDown={(e) => {
+              (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+              sheetDrag.current = { startY: e.clientY, startH: sheetHeightDvh, moved: false };
+            }}
+            onPointerMove={(e) => {
+              const d = sheetDrag.current;
+              if (!d) return;
+              if (Math.abs(e.clientY - d.startY) > 6) {
+                d.moved = true;
+                setSheetDragging(true);
+              }
+              if (!d.moved) return;
+              const vh = window.innerHeight / 100;
+              // 上に引くほど高く、下に引くほど低く（28〜92dvh に制限）
+              setSheetHeightDvh(Math.min(92, Math.max(28, d.startH + (d.startY - e.clientY) / vh)));
+            }}
+            onPointerUp={() => {
+              const d = sheetDrag.current;
+              sheetDrag.current = null;
+              setSheetDragging(false);
+              if (d?.moved) sheetJustDragged.current = true;
+            }}
+            onPointerCancel={() => {
+              sheetDrag.current = null;
+              setSheetDragging(false);
+            }}
+            className="sm:hidden flex justify-center items-center pt-2 pb-1 min-h-[44px] w-full touch-none select-none cursor-grab active:cursor-grabbing"
+          >
+            <span className="w-10 h-1 rounded-full bg-neutral-300" />
+          </button>
+          {/* デスクトップ用の幅リサイズグリップ（右端ドラッグで 320〜640px に自由調整） */}
+          {!(panelCollapsed && activePanel === 'route') && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="パネル幅を調整"
+              title="ドラッグでパネル幅を調整"
+              onPointerDown={(e) => {
+                (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                panelDrag.current = { startX: e.clientX, startW: panelWidthPx, moved: false };
+              }}
+              onPointerMove={(e) => {
+                const d = panelDrag.current;
+                if (!d) return;
+                if (Math.abs(e.clientX - d.startX) > 4) d.moved = true;
+                if (!d.moved) return;
+                setPanelWidthPx(Math.min(640, Math.max(320, Math.round(d.startW + (e.clientX - d.startX)))));
+              }}
+              onPointerUp={() => {
+                panelDrag.current = null;
+              }}
+              onPointerCancel={() => {
+                panelDrag.current = null;
+              }}
+              className="hidden sm:flex absolute top-0 bottom-0 right-0 w-2.5 cursor-ew-resize touch-none select-none items-center justify-center group"
+            >
+              <span className="w-1 h-16 rounded-full bg-neutral-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+          )}
           <div className="flex-1 min-h-0">
           {activePanel === 'route' && (
             <RoutePanel
