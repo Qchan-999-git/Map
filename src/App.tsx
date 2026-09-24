@@ -95,16 +95,18 @@ export default function App() {
     return () => mql.removeEventListener('change', onChange);
   }, []);
 
-  // パネルを閉じたら折りたたみ状態も解除
+  // パネルを閉じたら折りたたみ状態も解除。ルートパネル以外では走行モードも解除
   useEffect(() => {
     if (activePanel === 'none') setPanelCollapsed(false);
+    if (activePanel !== 'route') setIsDriving(false);
   }, [activePanel]);
 
   // パネル表示中はヘッダー・フッター・詳細カードをパネル幅ぶん右へずらす（デスクトップ）
-  const panelOpen = activePanel !== 'none';
+  // 走行中はパネルを隠して地図上に案内を重ねるため、ずらさない
+  const panelOpen = activePanel !== 'none' && !isDriving;
   const offsetRight = panelOpen && !panelCollapsed && isDesktop ? PANEL_WIDTH_PX + 16 : 0;
   const routeMapLeftOffset =
-    activePanel === 'route' && !panelCollapsed && isDesktop ? PANEL_WIDTH_PX : 0;
+    activePanel === 'route' && !panelCollapsed && !isDriving && isDesktop ? PANEL_WIDTH_PX : 0;
 
   // Route Planning State
   const [routeStart, setRouteStart] = useState<GeoPoint | null>(null);
@@ -194,7 +196,7 @@ export default function App() {
     ro.observe(node);
     ro.observe(parent);
     return () => ro.disconnect();
-  }, [activePanel]);
+  }, [activePanel, isDriving]);
   const [narrowRoadThreshold, setNarrowRoadThreshold] = useState<number>(() => {
     try {
       const stored = localStorage.getItem(NARROW_THRESHOLD_STORAGE_KEY);
@@ -405,20 +407,24 @@ export default function App() {
   };
 
   // Route calculation (driverProfile-aware + vehicleType-aware)
+  // 出発地・目的地を set した直後に呼ぶ場合、state はまだ古いので points で新しい値を渡す
   const handleCalculateRoute = async (
     mode: TravelMode = 'driving',
     profileOverride?: DriverProfile,
-    vehicleOverride?: VehicleType
+    vehicleOverride?: VehicleType,
+    points?: { start: GeoPoint | null; end: GeoPoint | null }
   ) => {
-    if (!routeStart || !routeEnd) return;
+    const start = points ? points.start : routeStart;
+    const end = points ? points.end : routeEnd;
+    if (!start || !end) return;
     setIsRoutingLoading(true);
     const profile = profileOverride ?? driverProfile;
     const vehicle = vehicleOverride ?? vehicleType;
 
     try {
       const result = await calculateRoute(
-        [routeStart.lat, routeStart.lng],
-        [routeEnd.lat, routeEnd.lng],
+        [start.lat, start.lng],
+        [end.lat, end.lng],
         mode,
         profile,
         vehicle,
@@ -469,7 +475,7 @@ export default function App() {
     setRouteStart(routeEnd);
     setRouteEnd(temp);
     if (routeResult && routeEnd && temp) {
-      handleCalculateRoute(routeResult.mode);
+      handleCalculateRoute(routeResult.mode, undefined, undefined, { start: routeEnd, end: temp });
     }
   };
 
@@ -639,7 +645,9 @@ export default function App() {
 
       {/* Top Floating Header & Search Bar */}
       <header
-        className="absolute top-3 left-3 right-3 sm:right-auto sm:left-4 z-30 flex items-start gap-2.5 pointer-events-none transition-[left] duration-200"
+        className={`absolute top-3 left-3 right-3 sm:right-auto sm:left-4 z-30 items-start gap-2.5 pointer-events-none transition-[left] duration-200 ${
+          isDriving ? 'hidden' : 'flex'
+        }`}
         style={offsetRight > 0 ? { left: offsetRight } : undefined}
       >
         {/* Brand Pill */}
@@ -672,11 +680,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Sliding Side Drawers (Route or Saved Spots) */}
+      {/* Sliding Side Drawers (Route or Saved Spots)。走行中は CSS で隠すだけ（GPS 追跡を保つためアンマウントしない） */}
       {activePanel !== 'none' && (
         <aside
           aria-label="サイドパネル"
-          className={`absolute left-0 bottom-0 z-40 flex flex-col animate-in slide-in-from-bottom duration-300 sm:slide-in-from-left sm:duration-200 shadow-2xl ${
+          className={`absolute left-0 bottom-0 z-40 ${isDriving ? 'hidden' : 'flex'} flex-col animate-in slide-in-from-bottom duration-300 sm:slide-in-from-left sm:duration-200 shadow-2xl ${
             panelCollapsed && activePanel === 'route'
               ? 'w-full h-16 sm:w-14 sm:top-0 sm:h-full sm:rounded-none rounded-t-2xl'
               : 'w-full h-[76vh] sm:top-0 sm:h-full sm:w-[420px] sm:rounded-none rounded-t-2xl'
@@ -704,11 +712,15 @@ export default function App() {
               onChangeNarrowRoadThreshold={setNarrowRoadThreshold}
               onSetStart={(pt) => {
                 setRouteStart(pt);
-                if (pt && routeEnd) handleCalculateRoute();
+                if (pt && routeEnd) {
+                  handleCalculateRoute(undefined, undefined, undefined, { start: pt, end: routeEnd });
+                }
               }}
               onSetEnd={(pt) => {
                 setRouteEnd(pt);
-                if (routeStart && pt) handleCalculateRoute();
+                if (routeStart && pt) {
+                  handleCalculateRoute(undefined, undefined, undefined, { start: routeStart, end: pt });
+                }
               }}
               onSwapPoints={handleSwapRoutePoints}
               onCalculateRoute={(mode, vehicle) => handleCalculateRoute(mode, undefined, vehicle)}
@@ -802,14 +814,18 @@ export default function App() {
               setClickedLocation(null);
               setSelectedSpot(null);
               setActivePanel('route');
-              if (routeEnd) handleCalculateRoute();
+              if (routeEnd) {
+                handleCalculateRoute(undefined, undefined, undefined, { start: pt, end: routeEnd });
+              }
             }}
             onSetEnd={(pt) => {
               setRouteEnd(pt);
               setClickedLocation(null);
               setSelectedSpot(null);
               setActivePanel('route');
-              if (routeStart) handleCalculateRoute();
+              if (routeStart) {
+                handleCalculateRoute(undefined, undefined, undefined, { start: routeStart, end: pt });
+              }
             }}
             onSaveSpot={handleSaveSpot}
           />
@@ -820,7 +836,9 @@ export default function App() {
       <nav
         ref={controlsNavRef}
         aria-label="地図操作コントロール"
-        className="absolute right-3 bottom-10 sm:right-4 sm:bottom-12 z-30"
+        className={`absolute right-3 sm:right-4 z-30 ${
+          isDriving ? 'bottom-28 sm:bottom-28' : 'bottom-10 sm:bottom-12'
+        }`}
       >
         <MapControls
           onZoomIn={handleZoomIn}
@@ -854,7 +872,7 @@ export default function App() {
 
       {/* Bottom Status Bar (Coordinates & Zoom Level) */}
       <footer
-        className="absolute bottom-2 left-3 sm:left-4 z-20 pointer-events-none hidden md:flex items-center gap-2 text-[11px] font-mono text-neutral-600 bg-white/80 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-neutral-200/60 shadow-xs transition-[left] duration-200"
+        className={`absolute bottom-2 left-3 sm:left-4 z-20 pointer-events-none hidden ${isDriving ? '' : 'md:flex'} items-center gap-2 text-[11px] font-mono text-neutral-600 bg-white/80 backdrop-blur-xs px-2.5 py-1 rounded-lg border border-neutral-200/60 shadow-xs transition-[left] duration-200`}
         style={offsetRight > 0 ? { left: offsetRight } : undefined}
       >
         <span>緯度: {mapCenter.lat.toFixed(4)}°</span>
@@ -867,7 +885,7 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="absolute bottom-16 sm:bottom-6 left-1/2 transform -translate-x-1/2 z-50 pointer-events-none animate-in fade-in slide-in-from-bottom-2 duration-150"
+          className={`absolute ${isDriving ? 'bottom-28' : 'bottom-16 sm:bottom-6'} left-1/2 transform -translate-x-1/2 z-50 pointer-events-none animate-in fade-in slide-in-from-bottom-2 duration-150`}
         >
           <div
             className={`px-4 py-2 rounded-xl shadow-xl backdrop-blur-md text-xs font-semibold flex items-center gap-2 border ${
