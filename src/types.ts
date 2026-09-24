@@ -154,10 +154,32 @@ export interface RouteResult {
   narrowRoadAnalysis?: NarrowRoadAnalysis;
   weather?: RouteWeather | null; // null = 取得失敗（表示のみ）
   congestion?: CongestionAnalysis | null; // null = 混雑情報なし（表示のみ）
+  accidents?: AccidentAnalysis | null; // null = 事故情報なし（表示のみ）
 }
 
 /** 区間ごとの混雑度 */
 export type CongestionLevel = 'smooth' | 'moderate' | 'heavy';
+
+/** 事故警告の深刻度 */
+export type AccidentSeverity = 'warning' | 'critical';
+
+/** 事故・危険区間の概要 */
+export interface AccidentSegment {
+  stepIndex: number;
+  name: string;
+  distance: number; // meters
+  severity: AccidentSeverity;
+  reason: string; // UI に出す根拠文（例: 合流部・シミュレーション・ユーザー報告）
+}
+
+/** ルート全体の事故警告解析結果 */
+export interface AccidentAnalysis {
+  segments: AccidentSegment[];
+  hasAccident: boolean; // critical が1件以上あるか
+  checkedAt: number;
+  simulated: boolean; // テスト用シミュレーション由来を含むか
+  provider: string; // 使用したプロバイダ名
+}
 
 /** 混雑区間の概要 */
 export interface CongestionSegment {
