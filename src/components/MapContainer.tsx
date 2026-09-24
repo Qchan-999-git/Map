@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { ClickedLocationInfo, GeoPoint, MapLayerConfig, ParkingSpot, RouteResult, RouteStep, SavedSpot, CongestionLevel } from '../types';
+import { AccidentSeverity, ClickedLocationInfo, GeoPoint, MapLayerConfig, ParkingSpot, RouteResult, RouteStep, SavedSpot, CongestionLevel } from '../types';
 import { CATEGORY_INFO } from '../data/mapLayers';
 import {
   drawPrecipField,
@@ -101,6 +101,16 @@ const CONGESTION_COLOR: Record<CongestionLevel, string> = {
   heavy: '#ef4444',
 };
 
+const ACCIDENT_COLOR: Record<AccidentSeverity, string> = {
+  warning: '#f97316',
+  critical: '#dc2626',
+};
+
+const ACCIDENT_LABEL: Record<AccidentSeverity, string> = {
+  warning: '事故注意',
+  critical: '事故発生中',
+};
+
 const CONGESTION_LABEL: Record<CongestionLevel, string> = {
   smooth: '順調',
   moderate: 'やや混雑',
@@ -125,6 +135,32 @@ function buildCongestionSections(
       const points = coordinates.slice(Math.min(startIdx, endIdx), Math.max(startIdx, endIdx) + 1);
       if (points.length < 2) return null;
       return { stepIndex: st, name: sec.name, level: sec.level, points };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+}
+
+/**
+ * 事故警告の区間（accidents.segments）をルートポリライン座標の区間へ分解する。
+ * 混雑と同じくステップの maneuver 地点を区切りの目安に使う。
+ */
+function buildAccidentSections(
+  coordinates: [number, number][],
+  sections: { stepIndex: number; name: string; severity: AccidentSeverity; reason: string }[]
+): { stepIndex: number; name: string; severity: AccidentSeverity; reason: string; points: [number, number][] }[] {
+  return sections
+    .map((sec) => {
+      const st = Math.max(0, Math.min(sec.stepIndex, coordinates.length - 1));
+      const endLoc = st === 0 ? coordinates[0] : coordinates[st];
+      const startLoc = st === 0 ? coordinates[0] : coordinates[Math.max(0, st - 1)];
+      const startIdx = nearestCoordIndex(coordinates, startLoc);
+      const endIdx = nearestCoordIndex(coordinates, endLoc);
+      // critical は少し広めに表示して視認性を上げる
+      const pad = sec.severity === 'critical' ? 3 : 0;
+      const from = Math.max(0, Math.min(startIdx, endIdx) - pad);
+      const to = Math.min(coordinates.length - 1, Math.max(startIdx, endIdx) + pad);
+      const points = coordinates.slice(from, to + 1);
+      if (points.length < 2) return null;
+      return { stepIndex: st, name: sec.name, severity: sec.severity, reason: sec.reason, points };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 }
@@ -650,6 +686,58 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       );
       layer.addLayer(line);
     });
+
+    // Accident warnings overlay (red, drawn on top of everything so warnings are visible)
+    if (routeResult.accidents && routeResult.accidents.segments.length > 0) {
+      const accidentSections = buildAccidentSections(
+        routeResult.coordinates,
+        routeResult.accidents.segments
+      );
+      accidentSections.forEach((sec) => {
+        const isCritical = sec.severity === 'critical';
+        const line = L.polyline(sec.points, {
+          color: ACCIDENT_COLOR[sec.severity],
+          weight: isCritical ? 9 : 6,
+          opacity: 0.95,
+          dashArray: isCritical ? undefined : '4, 6',
+          lineCap: 'round',
+          lineJoin: 'round',
+        });
+        line.bindTooltip(`${sec.name}（${ACCIDENT_LABEL[sec.severity]}）：${sec.reason}`, {
+          direction: 'top',
+          sticky: true,
+        });
+        layer.addLayer(line);
+      });
+      // critical には警告マーカーを追加（区間の中点）
+      accidentSections
+        .filter((sec) => sec.severity === 'critical')
+        .forEach((sec) => {
+          const mid = sec.points[Math.floor(sec.points.length / 2)];
+          if (!mid) return;
+          const html = `
+            <div class="w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+                <path d="M12 9v4"></path>
+                <path d="M12 17h.01"></path>
+              </svg>
+            </div>
+          `;
+          const icon = L.divIcon({
+            className: 'accident-pin',
+            html,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+          });
+          const marker = L.marker(mid, { icon, zIndexOffset: 2000 });
+          marker.bindTooltip(`事故発生中：${sec.name} — ${sec.reason}`, {
+            direction: 'top',
+            offset: [0, -14],
+          });
+          layer.addLayer(marker);
+        });
+    }
 
     // Fit route bounds nicely with padding (skip while driving to keep GPS follow stable)
     if (!isDriving) {

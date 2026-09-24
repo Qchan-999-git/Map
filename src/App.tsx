@@ -31,6 +31,11 @@ import {
 } from './services/mapService';
 import { Map as MapIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 import { RainSource, detectRainOnRoute } from './services/rainRadar';
+import {
+  clearAccidentReports as clearStoredAccidentReports,
+  getAccidentReports,
+  saveAccidentReport,
+} from './services/accident';
 
 const SAVED_SPOTS_STORAGE_KEY = 'map_app_saved_spots_v1';
 const DRIVER_PROFILE_STORAGE_KEY = 'map_app_driver_profile_v1';
@@ -175,6 +180,22 @@ export default function App() {
   });
   const [rainSource, setRainSource] = useState<RainSource | null>(null);
   const [routeRain, setRouteRain] = useState<boolean | null>(null);
+
+  // 事故警告（localStorage の報告 + テスト用シミュレーション）
+  const [simulateAccident, setSimulateAccident] = useState<boolean>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('accident') === 'sim';
+    } catch {
+      return false;
+    }
+  });
+  const [accidentReportCount, setAccidentReportCount] = useState<number>(() => {
+    try {
+      return getAccidentReports().length;
+    } catch {
+      return 0;
+    }
+  });
 
   // MapControls の位置を計測し、雨雲UIをボタン群の左隣（下端揃え）に置く（CSS 変数経由）
   const controlsNavRef = useRef<HTMLElement | null>(null);
@@ -408,12 +429,14 @@ export default function App() {
   const handleCalculateRoute = async (
     mode: TravelMode = 'driving',
     profileOverride?: DriverProfile,
-    vehicleOverride?: VehicleType
+    vehicleOverride?: VehicleType,
+    accidentOverride?: { simulate?: boolean }
   ) => {
     if (!routeStart || !routeEnd) return;
     setIsRoutingLoading(true);
     const profile = profileOverride ?? driverProfile;
     const vehicle = vehicleOverride ?? vehicleType;
+    const simulate = accidentOverride?.simulate ?? simulateAccident;
 
     try {
       const result = await calculateRoute(
@@ -422,11 +445,14 @@ export default function App() {
         mode,
         profile,
         vehicle,
-        { avoidNarrowRoads, narrowRoadThreshold, includeWeather: showWeather, includeTraffic: showTraffic }
+        { avoidNarrowRoads, narrowRoadThreshold, includeWeather: showWeather, includeTraffic: showTraffic, includeAccidents: true, simulateAccident: simulate }
       );
       setRouteResult(result);
       setNarrowHighlightStepIndex(null);
-      if (profile === 'expert') {
+      const criticalCount = result.accidents?.segments.filter((s) => s.severity === 'critical').length ?? 0;
+      if (criticalCount > 0) {
+        showToast(`事故発生中：ルート上に${criticalCount}件の警告があります`, 'error');
+      } else if (profile === 'expert') {
         showToast(
           `最速ルート検索: 約 ${formatDuration(result.totalDuration)}`,
           'success'
@@ -477,6 +503,39 @@ export default function App() {
     setRouteStart(null);
     setRouteEnd(null);
     setRouteResult(null);
+  };
+
+  // 事故シミュレーションの ON/OFF（切り替え時は既存ルートを再計算して警告を即時反映）
+  const handleToggleSimulateAccident = () => {
+    const next = !simulateAccident;
+    setSimulateAccident(next);
+    showToast(next ? 'テスト用の事故をシミュレートします' : 'シミュレーションを解除しました', 'info');
+    if (routeStart && routeEnd) {
+      // state 更新のタイミングに依存しないよう override で再計算する
+      setTimeout(() => {
+        handleCalculateRoute(routeResult?.mode ?? 'driving', undefined, undefined, { simulate: next });
+      }, 0);
+    }
+  };
+
+  // 事故報告のクリア
+  const handleClearAccidentReports = () => {
+    clearStoredAccidentReports();
+    setAccidentReportCount(0);
+    showToast('事故報告をクリアしました', 'info');
+    if (routeStart && routeEnd) {
+      handleCalculateRoute(routeResult?.mode ?? 'driving');
+    }
+  };
+
+  // 地図クリック地点の事故を報告（半径300m以内のルートに警告表示・6時間で失効）
+  const handleReportAccident = (lat: number, lng: number) => {
+    saveAccidentReport(lat, lng, 'ユーザー報告');
+    setAccidentReportCount(getAccidentReports().length);
+    showToast('事故を報告しました。ルートを再検索すると警告に反映されます', 'success');
+    if (routeStart && routeEnd) {
+      handleCalculateRoute(routeResult?.mode ?? 'driving');
+    }
   };
 
   // 目的地周辺の駐車場を検索（明示的なボタン押下時のみ実行）
@@ -730,6 +789,10 @@ export default function App() {
               showRain={showRain}
               onToggleRain={handleToggleRain}
               routeRain={routeRain}
+              simulateAccident={simulateAccident}
+              onToggleSimulateAccident={handleToggleSimulateAccident}
+              accidentReportCount={accidentReportCount}
+              onClearAccidentReports={handleClearAccidentReports}
               collapsed={panelCollapsed}
               onCollapse={() => setPanelCollapsed(true)}
               onExpand={() => setPanelCollapsed(false)}
@@ -812,6 +875,7 @@ export default function App() {
               if (routeStart) handleCalculateRoute();
             }}
             onSaveSpot={handleSaveSpot}
+            onReportAccident={() => handleReportAccident(clickedLocation.lat, clickedLocation.lng)}
           />
         </div>
       )}

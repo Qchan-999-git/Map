@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MapPin, Navigation, Bookmark, Copy, Check, X, Mountain, Flag, Loader2 } from 'lucide-react';
+import { MapPin, Navigation, Bookmark, Copy, Check, X, Mountain, Flag, Loader2, Siren } from 'lucide-react';
 import { ClickedLocationInfo, GeoPoint, SavedSpot, SpotCategory } from '../types';
 import { CATEGORY_INFO } from '../data/mapLayers';
 
@@ -10,6 +10,7 @@ interface SpotDetailCardProps {
   onSetEnd: (point: GeoPoint) => void;
   onSaveSpot: (spot: Omit<SavedSpot, 'id' | 'createdAt'>) => void;
   existingSpot?: SavedSpot | null;
+  onReportAccident?: () => void;
 }
 
 export const SpotDetailCard: React.FC<SpotDetailCardProps> = ({
@@ -19,6 +20,7 @@ export const SpotDetailCard: React.FC<SpotDetailCardProps> = ({
   onSetEnd,
   onSaveSpot,
   existingSpot,
+  onReportAccident,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(existingSpot?.title || '');
@@ -224,6 +226,18 @@ export const SpotDetailCard: React.FC<SpotDetailCardProps> = ({
             <Bookmark size={14} className="text-amber-400" />
             <span>{existingSpot ? '登録内容を編集' : 'お気に入り・地点に登録'}</span>
           </button>
+
+          {onReportAccident && (
+            <button
+              id="report-accident-btn"
+              onClick={onReportAccident}
+              title="この地点で発生している事故を報告します（ルート警告に反映）"
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold transition-colors"
+            >
+              <Siren size={14} />
+              <span>この地点の事故を報告</span>
+            </button>
+          )}
         </div>
       )}
     </div>

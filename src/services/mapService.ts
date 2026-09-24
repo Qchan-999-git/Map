@@ -5,6 +5,7 @@ import { analyzeNarrowRoads, verifyNarrowRoads } from './narrowRoad';
 import { analyzeElevated } from './elevated';
 import { getRouteWeather, WEATHER_STRESS_SCORE_ADD } from './weather';
 import { analyzeTraffic, TRAFFIC_STRESS_SCORE_ADD } from './traffic';
+import { analyzeAccidents } from './accident';
 
 /**
  * Calculates distance between two LatLng points using the Haversine formula (in meters).
@@ -267,6 +268,8 @@ export interface RouteOptions {
   narrowRoadThreshold?: number; // meters, default 4.0
   includeWeather?: boolean; // 気象情報を取得して所要時間・注意点へ反映する
   includeTraffic?: boolean; // 混雑情報を推定して所要時間・注意点へ反映する
+  includeAccidents?: boolean; // 事故警告を解析して注意点へ反映する（driving のみ）
+  simulateAccident?: boolean; // テスト用の模擬事故を1件含める
 }
 
 /**
@@ -317,6 +320,28 @@ function applyTrafficToResult(result: RouteResult): void {
     : congestion.adjustedDuration;
 }
 
+/**
+ * 事故警告を結果へ反映する（driving のみ）。
+ * critical があれば cautions の先頭に警告文を追記する（表示のみで所要時間は変えない）。
+ */
+function applyAccidentsToResult(result: RouteResult): void {
+  const accidents = result.accidents;
+  if (!accidents || accidents.segments.length === 0) return;
+  const critical = accidents.segments.filter((s) => s.severity === 'critical');
+  if (critical.length > 0) {
+    const first = critical[0];
+    result.cautions = [
+      `事故発生中：${first.name}付近（${critical.length}件）— 徐行・迂回をご検討ください`,
+      ...(result.cautions ?? []),
+    ];
+  } else if (accidents.segments.length > 0) {
+    result.cautions = [
+      ... (result.cautions ?? []),
+      `事故注意区間が${accidents.segments.length}件あります（合流・幹線）`,
+    ];
+  }
+}
+
 // ルート再計算時に前回の Overpass 検証を中断するためのコントローラ
 let narrowVerifyController: AbortController | null = null;
 
@@ -348,6 +373,8 @@ export async function calculateRoute(
   const avoidNarrowRoads = options?.avoidNarrowRoads ?? false;
   const narrowRoadThreshold = options?.narrowRoadThreshold ?? 4.0;
   const useTraffic = mode === 'driving' && options?.includeTraffic === true;
+  const useAccidents = mode === 'driving' && options?.includeAccidents !== false;
+  const simulateAccident = mode === 'driving' && options?.simulateAccident === true;
   const analysisTime = new Date(); // 混雑推定はルート計算時点を基準にする
   // 上級者モードも含め、複数案を取得（fastest / 低ストレス の比較に使う）
   const wantAlternatives =
@@ -498,6 +525,15 @@ export async function calculateRoute(
 
       if (options?.includeWeather) await applyWeather(result, driverProfile);
 
+      if (useAccidents) {
+        try {
+          result.accidents = await analyzeAccidents(result, { simulate: simulateAccident, at: analysisTime });
+          applyAccidentsToResult(result);
+        } catch (err) {
+          console.warn('Accident integration skipped:', err);
+        }
+      }
+
       return result;
     }
   } catch (err) {
@@ -551,6 +587,14 @@ export async function calculateRoute(
     }
   }
   if (options?.includeWeather) await applyWeather(fallback, driverProfile);
+  if (useAccidents) {
+    try {
+      fallback.accidents = await analyzeAccidents(fallback, { simulate: simulateAccident, at: analysisTime });
+      applyAccidentsToResult(fallback);
+    } catch (err) {
+      console.warn('Accident integration skipped:', err);
+    }
+  }
   return fallback;
 }
 
